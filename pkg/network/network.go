@@ -186,3 +186,75 @@ func PingHostWithTimeout(ip string, timeoutMs int) bool {
 	}
 	return true
 }
+
+// IsDeviceOnNetwork checks if a device with the given MAC address is on the network
+// by examining the ARP table. First refreshes ARP with a ping sweep if MAC not found.
+func IsDeviceOnNetwork(mac string) bool {
+	if runtime.GOOS != "windows" {
+		return true // Simulated on non-Windows
+	}
+
+	// Normalize MAC to lowercase with dashes
+	mac = strings.ToLower(mac)
+	mac = strings.ReplaceAll(mac, ":", "-")
+
+	// First check current ARP table
+	if checkARPForMAC(mac) {
+		return true
+	}
+
+	// MAC not in ARP table - do a quick ping sweep to refresh
+	ip, subnet, err := getLocalIP()
+	if err == nil {
+		pingSweep(ip, subnet)
+	}
+
+	// Check again after refresh
+	return checkARPForMAC(mac)
+}
+
+// checkARPForMAC checks if the MAC address exists in the current ARP table
+func checkARPForMAC(mac string) bool {
+	cmd := exec.Command("arp", "-a")
+	HideConsole(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Normalize and search
+	outputLower := strings.ToLower(string(output))
+	return strings.Contains(outputLower, mac)
+}
+
+// FindIPByMAC returns the IP address for a given MAC address from the ARP table
+func FindIPByMAC(mac string) string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+
+	mac = strings.ToLower(mac)
+	mac = strings.ReplaceAll(mac, ":", "-")
+
+	cmd := exec.Command("arp", "-a")
+	HideConsole(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(output), "\n")
+	re := regexp.MustCompile(`(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F-]{17})`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(line)
+		if len(matches) > 2 {
+			foundMAC := strings.ToLower(matches[2])
+			if foundMAC == mac {
+				return matches[1]
+			}
+		}
+	}
+
+	return ""
+}

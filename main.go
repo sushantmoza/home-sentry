@@ -1,18 +1,23 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"home-sentry/assets"
 	"home-sentry/pkg/config"
+	"home-sentry/pkg/logger"
 	"home-sentry/pkg/network"
 	"home-sentry/pkg/sentry"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"fyne.io/systray"
 )
 
-const Version = "1.1.0"
+// Version is set via ldflags at build time
+var Version = "dev"
 
 var (
 	sentryManager   *sentry.SentryManager
@@ -22,11 +27,21 @@ var (
 	mPause          *systray.MenuItem
 	mCancelShutdown *systray.MenuItem
 	deviceSubmenus  []*systray.MenuItem
+	ctx             context.Context
+	cancel          context.CancelFunc
 )
 
 func main() {
+	// Initialize logger
+	logDir := logger.GetLogDir()
+	if err := logger.Init(logDir, logger.INFO); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		// Continue without file logging
+	}
+
+	logger.Info("Home Sentry v%s starting", Version)
+
 	if len(os.Args) < 2 {
-		// Default: run with tray
 		runWithTray()
 		return
 	}
@@ -60,12 +75,28 @@ func main() {
 		runWithTray()
 	case "version":
 		fmt.Printf("Home Sentry v%s\n", Version)
+	case "logs":
+		runShowLogs()
 	default:
 		printHelp()
 	}
 }
 
 func runWithTray() {
+	// Setup graceful shutdown
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle OS signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigChan
+		logger.Info("Received signal %v, shutting down", sig)
+		cancel()
+		systray.Quit()
+	}()
+
 	systray.Run(onReady, onExit)
 }
 
@@ -74,9 +105,10 @@ func onReady() {
 	systray.SetTitle("Home Sentry")
 	systray.SetTooltip("Home Sentry - Monitoring")
 
-	// Load initial settings
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
+
+	logger.Info("Tray ready. SSID: %s, Home: %s, Phone: %s", currentSSID, settings.HomeSSID, settings.PhoneIP)
 
 	// Status info
 	mStatus = systray.AddMenuItem("Status: Starting...", "Current status")
@@ -95,15 +127,13 @@ func onReady() {
 
 	// Actions
 	mSetHome := systray.AddMenuItem("Set Current WiFi as Home", "Use current network as home")
-
-	// Device selector with submenu
 	mSelectDevice := systray.AddMenuItem("Select Monitored Device", "Choose device from network")
 	mScanDevices := mSelectDevice.AddSubMenuItem("🔄 Scan Network", "Scan for devices")
 
 	mPause = systray.AddMenuItem("Pause Protection", "Temporarily disable protection")
 
 	mCancelShutdown = systray.AddMenuItem("⚠️ Cancel Shutdown", "Cancel pending shutdown")
-	mCancelShutdown.Hide() // Hidden until shutdown is pending
+	mCancelShutdown.Hide()
 
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit Home Sentry")
@@ -117,9 +147,15 @@ func onReady() {
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-mSetHome.ClickedCh:
 				ssid := network.GetCurrentSSID()
-				config.Update(ssid, "")
+				if err := config.Update(ssid, ""); err != nil {
+					logger.Error("Failed to set home SSID: %v", err)
+				} else {
+					logger.Info("Home SSID set to: %s", ssid)
+				}
 				updateInfoDisplay()
 			case <-mScanDevices.ClickedCh:
 				scanAndPopulateDevices(mSelectDevice)
@@ -128,9 +164,11 @@ func onReady() {
 				if settings.IsPaused {
 					config.SetPaused(false)
 					mPause.SetTitle("Pause Protection")
+					logger.Info("Protection resumed")
 				} else {
 					config.SetPaused(true)
 					mPause.SetTitle("Resume Protection")
+					logger.Info("Protection paused")
 				}
 			case <-mCancelShutdown.ClickedCh:
 				if sentryManager.CancelShutdown() {
@@ -138,8 +176,10 @@ func onReady() {
 					if mStatus != nil {
 						mStatus.SetTitle("Status: Shutdown Cancelled")
 					}
+					logger.Info("Shutdown cancelled by user")
 				}
 			case <-mQuit.ClickedCh:
+				logger.Info("User requested quit")
 				systray.Quit()
 			}
 		}
@@ -147,9 +187,15 @@ func onReady() {
 
 	// Update display periodically
 	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
 		for {
-			updateInfoDisplay()
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				updateInfoDisplay()
+			}
 		}
 	}()
 }
@@ -169,7 +215,6 @@ func updateInfoDisplay() {
 		}
 	}
 
-	// Show/hide cancel shutdown based on state
 	if sentryManager != nil && mCancelShutdown != nil {
 		if sentryManager.IsShutdownPending() {
 			mCancelShutdown.Show()
@@ -180,18 +225,18 @@ func updateInfoDisplay() {
 }
 
 func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
-	// Clear old device submenus
 	for _, item := range deviceSubmenus {
 		item.Hide()
 	}
 	deviceSubmenus = nil
 
-	// Scan network
 	if mStatus != nil {
 		mStatus.SetTitle("Status: Scanning network...")
 	}
+	logger.Info("Starting network scan")
 
 	devices := network.ScanNetworkDevices()
+	logger.Info("Found %d devices", len(devices))
 
 	if len(devices) == 0 {
 		noDevices := parentMenu.AddSubMenuItem("No devices found", "")
@@ -203,7 +248,6 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 		return
 	}
 
-	// Add each device as a submenu item
 	for _, device := range devices {
 		deviceName := fmt.Sprintf("%s (%s)", device.Hostname, device.IP)
 		if device.Hostname == "Unknown" {
@@ -213,13 +257,15 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 		deviceItem := parentMenu.AddSubMenuItem(deviceName, fmt.Sprintf("MAC: %s", device.MAC))
 		deviceSubmenus = append(deviceSubmenus, deviceItem)
 
-		// Capture the IP for the closure
 		deviceIP := device.IP
 
-		// Handle device selection
 		go func(ip string, item *systray.MenuItem) {
 			<-item.ClickedCh
-			config.Update("", ip)
+			if err := config.Update("", ip); err != nil {
+				logger.Error("Failed to set device IP: %v", err)
+			} else {
+				logger.Info("Device IP set to: %s", ip)
+			}
 			updateInfoDisplay()
 			if mStatus != nil {
 				mStatus.SetTitle(fmt.Sprintf("Device set: %s", ip))
@@ -235,6 +281,8 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 func onStatusChange(status sentry.SentryStatus) {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
+
+	logger.Debug("Status changed to: %s", status)
 
 	switch status {
 	case sentry.StatusMonitoring:
@@ -286,7 +334,10 @@ func onStatusChange(status sentry.SentryStatus) {
 }
 
 func onExit() {
-	// Cleanup
+	logger.Info("Home Sentry shutting down")
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func printHelp() {
@@ -301,6 +352,7 @@ func printHelp() {
 	fmt.Println("  pause             Pause protection")
 	fmt.Println("  resume            Resume protection")
 	fmt.Println("  version           Show version")
+	fmt.Println("  logs              Show recent log entries")
 	fmt.Println("  run               Start with system tray")
 }
 
@@ -346,6 +398,7 @@ func runStatus() {
 	fmt.Printf("Poll Interval:  %ds\n", settings.PollInterval)
 	fmt.Printf("Ping Timeout:   %dms\n", settings.PingTimeoutMs)
 	fmt.Printf("Settings File:  %s\n", config.GetSettingsPath())
+	fmt.Printf("Log Directory:  %s\n", logger.GetLogDir())
 
 	if currentSSID == settings.HomeSSID {
 		fmt.Println("Status:         AT HOME")
@@ -361,6 +414,7 @@ func runSetHome(ssid string) {
 		return
 	}
 	fmt.Printf("Home SSID updated to: %s\n", ssid)
+	logger.Info("Home SSID set via CLI: %s", ssid)
 }
 
 func runSetDevice(ip string) {
@@ -374,6 +428,7 @@ func runSetDevice(ip string) {
 		return
 	}
 	fmt.Printf("Monitored Device IP updated to: %s\n", ip)
+	logger.Info("Device IP set via CLI: %s", ip)
 }
 
 func runSetPaused(paused bool) {
@@ -384,7 +439,25 @@ func runSetPaused(paused bool) {
 	}
 	if paused {
 		fmt.Println("Protection PAUSED.")
+		logger.Info("Protection paused via CLI")
 	} else {
 		fmt.Println("Protection RESUMED.")
+		logger.Info("Protection resumed via CLI")
+	}
+}
+
+func runShowLogs() {
+	logs, err := logger.GetRecentLogs(20)
+	if err != nil {
+		fmt.Println("Error reading logs:", err)
+		return
+	}
+
+	fmt.Printf("Recent logs from: %s\n", logger.GetLogDir())
+	fmt.Println("-------------------")
+	for _, line := range logs {
+		if line != "" {
+			fmt.Println(line)
+		}
 	}
 }
