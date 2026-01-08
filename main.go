@@ -7,17 +7,21 @@ import (
 	"home-sentry/pkg/network"
 	"home-sentry/pkg/sentry"
 	"os"
+	"time"
 
 	"fyne.io/systray"
 )
 
+const Version = "1.1.0"
+
 var (
-	sentryManager  *sentry.SentryManager
-	mStatus        *systray.MenuItem
-	mWiFi          *systray.MenuItem
-	mPhoneIP       *systray.MenuItem
-	mPause         *systray.MenuItem
-	deviceSubmenus []*systray.MenuItem
+	sentryManager   *sentry.SentryManager
+	mStatus         *systray.MenuItem
+	mWiFi           *systray.MenuItem
+	mPhoneIP        *systray.MenuItem
+	mPause          *systray.MenuItem
+	mCancelShutdown *systray.MenuItem
+	deviceSubmenus  []*systray.MenuItem
 )
 
 func main() {
@@ -54,6 +58,8 @@ func main() {
 		runSetPaused(false)
 	case "run":
 		runWithTray()
+	case "version":
+		fmt.Printf("Home Sentry v%s\n", Version)
 	default:
 		printHelp()
 	}
@@ -82,6 +88,9 @@ func onReady() {
 	mPhoneIP = systray.AddMenuItem(fmt.Sprintf("Phone: %s", settings.PhoneIP), "Monitored device IP")
 	mPhoneIP.Disable()
 
+	mVersion := systray.AddMenuItem(fmt.Sprintf("Version: %s", Version), "Application version")
+	mVersion.Disable()
+
 	systray.AddSeparator()
 
 	// Actions
@@ -92,6 +101,9 @@ func onReady() {
 	mScanDevices := mSelectDevice.AddSubMenuItem("🔄 Scan Network", "Scan for devices")
 
 	mPause = systray.AddMenuItem("Pause Protection", "Temporarily disable protection")
+
+	mCancelShutdown = systray.AddMenuItem("⚠️ Cancel Shutdown", "Cancel pending shutdown")
+	mCancelShutdown.Hide() // Hidden until shutdown is pending
 
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "Exit Home Sentry")
@@ -120,6 +132,13 @@ func onReady() {
 					config.SetPaused(true)
 					mPause.SetTitle("Resume Protection")
 				}
+			case <-mCancelShutdown.ClickedCh:
+				if sentryManager.CancelShutdown() {
+					mCancelShutdown.Hide()
+					if mStatus != nil {
+						mStatus.SetTitle("Status: Shutdown Cancelled")
+					}
+				}
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -128,9 +147,9 @@ func onReady() {
 
 	// Update display periodically
 	go func() {
-		for i := 0; i < 100; i++ {
+		for {
 			updateInfoDisplay()
-			// Sleep briefly
+			time.Sleep(5 * time.Second)
 		}
 	}()
 }
@@ -147,6 +166,15 @@ func updateInfoDisplay() {
 			mPhoneIP.SetTitle(fmt.Sprintf("Phone: %s", settings.PhoneIP))
 		} else {
 			mPhoneIP.SetTitle("Phone: Not Set")
+		}
+	}
+
+	// Show/hide cancel shutdown based on state
+	if sentryManager != nil && mCancelShutdown != nil {
+		if sentryManager.IsShutdownPending() {
+			mCancelShutdown.Show()
+		} else {
+			mCancelShutdown.Hide()
 		}
 	}
 }
@@ -230,12 +258,22 @@ func onStatusChange(status sentry.SentryStatus) {
 		if mStatus != nil {
 			mStatus.SetTitle("Status: SHUTDOWN 🔴")
 		}
+		if mCancelShutdown != nil {
+			mCancelShutdown.Show()
+		}
 	case sentry.StatusPaused:
 		systray.SetIcon(assets.IconYellow)
 		systray.SetTooltip(fmt.Sprintf("Home Sentry - Paused\nProtection disabled\nWiFi: %s", currentSSID))
 		systray.SetTitle("⏸")
 		if mStatus != nil {
 			mStatus.SetTitle("Status: Paused ⏸")
+		}
+	case sentry.StatusWaitingForPhone:
+		systray.SetIcon(assets.IconYellow)
+		systray.SetTooltip(fmt.Sprintf("Home Sentry - Waiting\nWaiting for phone...\nWiFi: %s", currentSSID))
+		systray.SetTitle("📱")
+		if mStatus != nil {
+			mStatus.SetTitle("Status: Waiting for Phone 📱")
 		}
 	default:
 		systray.SetIcon(assets.IconGreen)
@@ -252,7 +290,7 @@ func onExit() {
 }
 
 func printHelp() {
-	fmt.Println("Home Sentry - CLI")
+	fmt.Printf("Home Sentry v%s - CLI\n", Version)
 	fmt.Println("Usage:")
 	fmt.Println("  (no args)         Start with system tray")
 	fmt.Println("  scan              Scan local network for devices")
@@ -262,6 +300,7 @@ func printHelp() {
 	fmt.Println("  set-device <ip>   Set your monitored device IP")
 	fmt.Println("  pause             Pause protection")
 	fmt.Println("  resume            Resume protection")
+	fmt.Println("  version           Show version")
 	fmt.Println("  run               Start with system tray")
 }
 
@@ -297,15 +336,21 @@ func runStatus() {
 	}
 
 	currentSSID := network.GetCurrentSSID()
-	fmt.Printf("Current SSID: %s\n", currentSSID)
-	fmt.Printf("Home SSID:    %s\n", settings.HomeSSID)
-	fmt.Printf("Phone IP:     %s\n", settings.PhoneIP)
-	fmt.Printf("Paused:       %v\n", settings.IsPaused)
+	fmt.Printf("Home Sentry v%s\n", Version)
+	fmt.Println("-------------------")
+	fmt.Printf("Current SSID:   %s\n", currentSSID)
+	fmt.Printf("Home SSID:      %s\n", settings.HomeSSID)
+	fmt.Printf("Phone IP:       %s\n", settings.PhoneIP)
+	fmt.Printf("Paused:         %v\n", settings.IsPaused)
+	fmt.Printf("Grace Checks:   %d\n", settings.GraceChecks)
+	fmt.Printf("Poll Interval:  %ds\n", settings.PollInterval)
+	fmt.Printf("Ping Timeout:   %dms\n", settings.PingTimeoutMs)
+	fmt.Printf("Settings File:  %s\n", config.GetSettingsPath())
 
 	if currentSSID == settings.HomeSSID {
-		fmt.Println("Status:       AT HOME")
+		fmt.Println("Status:         AT HOME")
 	} else {
-		fmt.Println("Status:       ROAMING")
+		fmt.Println("Status:         ROAMING")
 	}
 }
 
@@ -319,6 +364,10 @@ func runSetHome(ssid string) {
 }
 
 func runSetDevice(ip string) {
+	if !config.ValidateIP(ip) {
+		fmt.Printf("Error: Invalid IP address: %s\n", ip)
+		return
+	}
 	err := config.Update("", ip)
 	if err != nil {
 		fmt.Println("Error saving settings:", err)

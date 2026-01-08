@@ -174,9 +174,12 @@ func scanARPWindows() []NetworkDevice {
 }
 
 func PingHost(ip string) bool {
-	// 1 count, 200ms wait
+	return PingHostWithTimeout(ip, 500)
+}
+
+func PingHostWithTimeout(ip string, timeoutMs int) bool {
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("ping", "-n", "1", "-w", "200", ip)
+		cmd := exec.Command("ping", "-n", "1", "-w", strconv.Itoa(timeoutMs), ip)
 		HideConsole(cmd)
 		err := cmd.Run()
 		return err == nil
