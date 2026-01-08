@@ -204,10 +204,6 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 	}
 }
 
-func showDeviceSelector() {
-	// Deprecated - now using scanAndPopulateDevices
-}
-
 func onStatusChange(status sentry.SentryStatus) {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
