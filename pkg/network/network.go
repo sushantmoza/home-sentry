@@ -1,0 +1,185 @@
+package network
+
+import (
+	"fmt"
+	"net"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+type NetworkDevice struct {
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname"`
+	MAC      string `json:"mac"`
+}
+
+func GetCurrentSSID() string {
+	if runtime.GOOS == "windows" {
+		return getWindowsSSID()
+	}
+	return "Simulated WiFi"
+}
+
+func ScanWifiNetworks() []string {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("netsh", "wlan", "show", "networks")
+		HideConsole(cmd)
+		output, err := cmd.Output()
+		if err != nil {
+			return []string{}
+		}
+
+		var ssids []string
+		re := regexp.MustCompile(`SSID \d+ : (.+)`)
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			matches := re.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				ssid := strings.TrimSpace(matches[1])
+				if ssid != "" {
+					ssids = append(ssids, ssid)
+				}
+			}
+		}
+		return ssids
+	}
+	return []string{"Simulated Network 1", "Simulated Network 2"}
+}
+
+func getWindowsSSID() string {
+	cmd := exec.Command("netsh", "wlan", "show", "interfaces")
+	HideConsole(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return "Unknown"
+	}
+
+	re := regexp.MustCompile(`\s+SSID\s+:\s+(.+)`)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(line)
+		if len(matches) > 1 {
+			return strings.TrimSpace(matches[1])
+		}
+	}
+	return "Disconnected"
+}
+
+func ScanNetworkDevices() []NetworkDevice {
+	if runtime.GOOS == "windows" {
+		// 1. Determine local subnet
+		ip, subnet, err := getLocalIP()
+		if err == nil {
+			// 2. Ping sweep to populate ARP table
+			pingSweep(ip, subnet)
+		}
+		// 3. Read ARP table
+		return scanARPWindows()
+	}
+	return []NetworkDevice{
+		{IP: "192.168.1.100", Hostname: "Simulated-iPhone", MAC: "00:11:22:33:44:55"},
+	}
+}
+
+func getLocalIP() (string, string, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "", "", err
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	// Get mask - simple assumption /24 for now as fetching valid mask is complex cross-platform without cgo
+	// In a real robust app we'd iterate interfaces.
+	return localAddr.IP.String(), "255.255.255.0", nil
+}
+
+func pingSweep(myIP string, mask string) {
+	// Simple assumption: /24 network
+	parts := strings.Split(myIP, ".")
+	if len(parts) != 4 {
+		return
+	}
+	baseIP := fmt.Sprintf("%s.%s.%s.", parts[0], parts[1], parts[2])
+
+	var wg sync.WaitGroup
+	// Ping 1-254
+	for i := 1; i < 255; i++ {
+		targetIP := baseIP + strconv.Itoa(i)
+		// Don't ping self
+		if targetIP == myIP {
+			continue
+		}
+
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			// Fast timeout ping
+			PingHost(ip)
+		}(targetIP)
+	}
+	wg.Wait()
+}
+
+func scanARPWindows() []NetworkDevice {
+	cmd := exec.Command("arp", "-a")
+	HideConsole(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return []NetworkDevice{}
+	}
+
+	var devices []NetworkDevice
+	lines := strings.Split(string(output), "\n")
+	re := regexp.MustCompile(`(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F-]{17})`)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(line)
+		if len(matches) > 2 {
+			ip := matches[1]
+			mac := matches[2]
+			if strings.HasPrefix(ip, "224.") || strings.HasPrefix(ip, "239.") || mac == "ff-ff-ff-ff-ff-ff" {
+				continue
+			}
+
+			wg.Add(1)
+			go func(ip, mac string) {
+				defer wg.Done()
+				hostname := "Unknown"
+
+				names, err := net.LookupAddr(ip)
+				if err == nil && len(names) > 0 {
+					hostname = strings.TrimSuffix(names[0], ".")
+				}
+
+				mu.Lock()
+				devices = append(devices, NetworkDevice{
+					IP:       ip,
+					Hostname: hostname,
+					MAC:      mac,
+				})
+				mu.Unlock()
+			}(ip, mac)
+		}
+	}
+	wg.Wait()
+	return devices
+}
+
+func PingHost(ip string) bool {
+	// 1 count, 200ms wait
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("ping", "-n", "1", "-w", "200", ip)
+		HideConsole(cmd)
+		err := cmd.Run()
+		return err == nil
+	}
+	return true
+}
