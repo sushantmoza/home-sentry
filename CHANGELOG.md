@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+## [Unreleased]
+
+## [1.3.3] - 2026-01-09
+
+### Fixed
+- **Tray Icon**: Resized all icons to standard 64x64 size to fix invisible tray icon issue (previous 2048x2048 icons were too large for Windows API)
+
+## [1.3.2] - 2026-01-09
+
+### Updated
+- **Assets**: Updated application icons with new PNGs
+
 ## [1.3.1] - 2026-01-09
 
 ### Fixed
