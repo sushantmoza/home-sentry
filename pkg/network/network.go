@@ -188,7 +188,7 @@ func PingHostWithTimeout(ip string, timeoutMs int) bool {
 }
 
 // IsDeviceOnNetwork checks if a device with the given MAC address is on the network
-// by examining the ARP table. First refreshes ARP with a ping sweep if MAC not found.
+// by actively verifying its presence (not trusting stale ARP cache).
 func IsDeviceOnNetwork(mac string) bool {
 	if runtime.GOOS != "windows" {
 		return true // Simulated on non-Windows
@@ -198,19 +198,35 @@ func IsDeviceOnNetwork(mac string) bool {
 	mac = strings.ToLower(mac)
 	mac = strings.ReplaceAll(mac, ":", "-")
 
-	// First check current ARP table
-	if checkARPForMAC(mac) {
-		return true
+	// First find the IP associated with this MAC (if any)
+	lastKnownIP := FindIPByMAC(mac)
+
+	// Delete stale ARP entry to force fresh lookup
+	if lastKnownIP != "" {
+		deleteARPEntry(lastKnownIP)
 	}
 
-	// MAC not in ARP table - do a quick ping sweep to refresh
-	ip, subnet, err := getLocalIP()
-	if err == nil {
-		pingSweep(ip, subnet)
+	// If we had an IP, ping it directly to refresh ARP
+	if lastKnownIP != "" {
+		// Ping the specific IP with short timeout
+		PingHostWithTimeout(lastKnownIP, 500)
+	} else {
+		// No cached IP - do a quick ping sweep to find the device
+		ip, subnet, err := getLocalIP()
+		if err == nil {
+			pingSweep(ip, subnet)
+		}
 	}
 
-	// Check again after refresh
+	// Now check if MAC appeared in fresh ARP table
 	return checkARPForMAC(mac)
+}
+
+// deleteARPEntry removes a specific IP from the ARP cache to force fresh lookup
+func deleteARPEntry(ip string) {
+	cmd := exec.Command("arp", "-d", ip)
+	HideConsole(cmd)
+	cmd.Run() // Ignore errors - may fail if not admin, that's OK
 }
 
 // checkARPForMAC checks if the MAC address exists in the current ARP table

@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+## [1.3.6] - 2026-01-09
+
+### Fixed
+- **Detection Logic**: Fixed stale ARP cache causing phone to appear online when disconnected
+  - Now actively deletes cached ARP entry before each check
+  - Pings last known IP to force fresh ARP lookup
+  - Only trusts MAC presence after active verification
+
 ## [1.3.4] - 2026-01-09
 
 ### Fixed

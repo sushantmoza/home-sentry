@@ -4,11 +4,11 @@ import (
 	_ "embed"
 )
 
-//go:embed icon_green.png
+//go:embed icon_green.ico
 var IconGreen []byte
 
-//go:embed icon_yellow.png
+//go:embed icon_yellow.ico
 var IconYellow []byte
 
-//go:embed icon_red.png
+//go:embed icon_red.ico
 var IconRed []byte
