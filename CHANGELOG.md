@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-01-09
+
+### Added
+- **Auto-start on boot**: Toggle from tray menu to start Home Sentry with Windows
+- **Sound alerts**: Warning beeps play every 2 seconds during shutdown countdown
+- **Location status**: Tray shows "🏠 At Home" or "📍 Roaming" based on WiFi
+- **Improved scan UI**: Better device listing with emoji icons, device count header, and clearer tooltips
+
+### Changed
+- All menu items now have emoji icons for better visual clarity
+- Scan results show "📱 Hostname (IP)" format with MAC in tooltip
+- Status messages use emoji indicators (⏳, ✅, ❌)
+
 ## [1.2.0] - 2026-01-09
 
 ### Added

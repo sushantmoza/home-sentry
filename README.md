@@ -15,7 +15,10 @@
 - ⏸️ **Pause** - Temporarily disable protection
 - 📱 **Device Selection** - Scan and select your phone from network
 - 🌐 **WiFi Detection** - Auto-detect home network
-- 🛑 **Cancel Shutdown** - Abort pending shutdown
+- 🛑 **Cancel Shutdown** - Abort pending shutdown with sound alert
+- 🔊 **Sound Alerts** - Warning beeps during shutdown countdown
+- 🚀 **Auto-Start** - Optionally start with Windows
+- 🏠 **Location Status** - Shows "At Home" or "Roaming" in tray
 - 📝 **File Logging** - Daily log rotation with auto-cleanup
 
 ## Quick Start

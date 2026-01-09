@@ -148,19 +148,52 @@ func (s *SentryManager) triggerShutdownWithCountdown(settings config.Settings) {
 	// Show notification
 	s.showNotification("Home Sentry Alert", "Phone not detected! Shutting down in 10 seconds...")
 
-	// 10 second countdown with cancel option
+	// Play initial warning sound
+	s.playWarningSound()
+
+	// 10 second countdown with cancel option and periodic beeps
 	log.Println("Starting 10 second shutdown countdown...")
-	select {
-	case <-time.After(10 * time.Second):
-		// Countdown completed, proceed with shutdown
-		s.mu.Lock()
-		s.shutdownPending = false
-		s.mu.Unlock()
-		s.executeShutdown()
-	case <-s.cancelShutdown:
-		// Shutdown was cancelled
-		log.Println("Shutdown countdown cancelled")
-		s.setStatus(StatusMonitoring)
+
+	// Timer for the total countdown
+	shutdownTimer := time.NewTimer(10 * time.Second)
+	defer shutdownTimer.Stop()
+
+	// Ticker for periodic beeps
+	beepTicker := time.NewTicker(2 * time.Second)
+	defer beepTicker.Stop()
+
+	countdown := 8 // Already played first beep, next beep shows 8 seconds
+	for {
+		select {
+		case <-beepTicker.C:
+			if countdown > 0 {
+				s.playWarningSound()
+				log.Printf("Shutdown in %d seconds...", countdown)
+				countdown -= 2
+			}
+		case <-shutdownTimer.C:
+			// Countdown completed, proceed with shutdown
+			s.mu.Lock()
+			s.shutdownPending = false
+			s.mu.Unlock()
+			s.executeShutdown()
+			return
+		case <-s.cancelShutdown:
+			// Shutdown was cancelled
+			log.Println("Shutdown countdown cancelled")
+			s.setStatus(StatusMonitoring)
+			return
+		}
+	}
+}
+
+// playWarningSound plays a system warning beep
+func (s *SentryManager) playWarningSound() {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command",
+			"[console]::beep(1000, 300)")
+		network.HideConsole(cmd)
+		go cmd.Run()
 	}
 }
 
