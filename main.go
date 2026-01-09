@@ -23,7 +23,7 @@ var (
 	sentryManager   *sentry.SentryManager
 	mStatus         *systray.MenuItem
 	mWiFi           *systray.MenuItem
-	mPhoneIP        *systray.MenuItem
+	mPhoneMAC       *systray.MenuItem
 	mPause          *systray.MenuItem
 	mCancelShutdown *systray.MenuItem
 	deviceSubmenus  []*systray.MenuItem
@@ -63,7 +63,8 @@ func main() {
 		runSetHome(os.Args[2])
 	case "set-device":
 		if len(os.Args) < 3 {
-			fmt.Println("Usage: home-sentry set-device <ip>")
+			fmt.Println("Usage: home-sentry set-device <mac>")
+			fmt.Println("Format: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF")
 			return
 		}
 		runSetDevice(os.Args[2])
@@ -108,7 +109,7 @@ func onReady() {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
 
-	logger.Info("Tray ready. SSID: %s, Home: %s, Phone: %s", currentSSID, settings.HomeSSID, settings.PhoneIP)
+	logger.Info("Tray ready. SSID: %s, Home: %s, Phone MAC: %s", currentSSID, settings.HomeSSID, settings.PhoneMAC)
 
 	// Status info
 	mStatus = systray.AddMenuItem("Status: Starting...", "Current status")
@@ -117,8 +118,12 @@ func onReady() {
 	mWiFi = systray.AddMenuItem(fmt.Sprintf("WiFi: %s", currentSSID), "Current WiFi network")
 	mWiFi.Disable()
 
-	mPhoneIP = systray.AddMenuItem(fmt.Sprintf("Phone: %s", settings.PhoneIP), "Monitored device IP")
-	mPhoneIP.Disable()
+	phoneDisplay := "Not Set"
+	if settings.PhoneMAC != "" {
+		phoneDisplay = settings.PhoneMAC
+	}
+	mPhoneMAC = systray.AddMenuItem(fmt.Sprintf("Phone: %s", phoneDisplay), "Monitored device MAC")
+	mPhoneMAC.Disable()
 
 	mVersion := systray.AddMenuItem(fmt.Sprintf("Version: %s", Version), "Application version")
 	mVersion.Disable()
@@ -207,11 +212,11 @@ func updateInfoDisplay() {
 	if mWiFi != nil {
 		mWiFi.SetTitle(fmt.Sprintf("WiFi: %s", currentSSID))
 	}
-	if mPhoneIP != nil {
-		if settings.PhoneIP != "" {
-			mPhoneIP.SetTitle(fmt.Sprintf("Phone: %s", settings.PhoneIP))
+	if mPhoneMAC != nil {
+		if settings.PhoneMAC != "" {
+			mPhoneMAC.SetTitle(fmt.Sprintf("Phone: %s", settings.PhoneMAC))
 		} else {
-			mPhoneIP.SetTitle("Phone: Not Set")
+			mPhoneMAC.SetTitle("Phone: Not Set")
 		}
 	}
 
@@ -257,20 +262,22 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 		deviceItem := parentMenu.AddSubMenuItem(deviceName, fmt.Sprintf("MAC: %s", device.MAC))
 		deviceSubmenus = append(deviceSubmenus, deviceItem)
 
-		deviceIP := device.IP
+		// Capture MAC and hostname for the goroutine
+		deviceMAC := device.MAC
+		deviceHostname := device.Hostname
 
-		go func(ip string, item *systray.MenuItem) {
+		go func(mac string, hostname string, item *systray.MenuItem) {
 			<-item.ClickedCh
-			if err := config.Update("", ip); err != nil {
-				logger.Error("Failed to set device IP: %v", err)
+			if err := config.Update("", mac); err != nil {
+				logger.Error("Failed to set device MAC: %v", err)
 			} else {
-				logger.Info("Device IP set to: %s", ip)
+				logger.Info("Device MAC set to: %s (%s)", mac, hostname)
 			}
 			updateInfoDisplay()
 			if mStatus != nil {
-				mStatus.SetTitle(fmt.Sprintf("Device set: %s", ip))
+				mStatus.SetTitle(fmt.Sprintf("Device set: %s", mac))
 			}
-		}(deviceIP, deviceItem)
+		}(deviceMAC, deviceHostname, deviceItem)
 	}
 
 	if mStatus != nil {
@@ -287,7 +294,7 @@ func onStatusChange(status sentry.SentryStatus) {
 	switch status {
 	case sentry.StatusMonitoring:
 		systray.SetIcon(assets.IconGreen)
-		systray.SetTooltip(fmt.Sprintf("Home Sentry - Safe\nWiFi: %s\nPhone: %s", currentSSID, settings.PhoneIP))
+		systray.SetTooltip(fmt.Sprintf("Home Sentry - Safe\nWiFi: %s\nPhone MAC: %s", currentSSID, settings.PhoneMAC))
 		systray.SetTitle("🟢")
 		if mStatus != nil {
 			mStatus.SetTitle("Status: Safe 🟢")
@@ -348,7 +355,7 @@ func printHelp() {
 	fmt.Println("  wifi              Scan for available WiFi networks")
 	fmt.Println("  status            Show current status and settings")
 	fmt.Println("  set-home <ssid>   Set your home network SSID")
-	fmt.Println("  set-device <ip>   Set your monitored device IP")
+	fmt.Println("  set-device <mac>   Set monitored device MAC address")
 	fmt.Println("  pause             Pause protection")
 	fmt.Println("  resume            Resume protection")
 	fmt.Println("  version           Show version")
@@ -392,7 +399,8 @@ func runStatus() {
 	fmt.Println("-------------------")
 	fmt.Printf("Current SSID:   %s\n", currentSSID)
 	fmt.Printf("Home SSID:      %s\n", settings.HomeSSID)
-	fmt.Printf("Phone IP:       %s\n", settings.PhoneIP)
+	fmt.Printf("Phone MAC:      %s\n", settings.PhoneMAC)
+	fmt.Printf("Detection:      %s\n", settings.DetectionType)
 	fmt.Printf("Paused:         %v\n", settings.IsPaused)
 	fmt.Printf("Grace Checks:   %d\n", settings.GraceChecks)
 	fmt.Printf("Poll Interval:  %ds\n", settings.PollInterval)
@@ -417,18 +425,19 @@ func runSetHome(ssid string) {
 	logger.Info("Home SSID set via CLI: %s", ssid)
 }
 
-func runSetDevice(ip string) {
-	if !config.ValidateIP(ip) {
-		fmt.Printf("Error: Invalid IP address: %s\n", ip)
+func runSetDevice(mac string) {
+	if !config.ValidateMAC(mac) {
+		fmt.Printf("Error: Invalid MAC address: %s\n", mac)
+		fmt.Println("Format: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF")
 		return
 	}
-	err := config.Update("", ip)
+	err := config.Update("", mac)
 	if err != nil {
 		fmt.Println("Error saving settings:", err)
 		return
 	}
-	fmt.Printf("Monitored Device IP updated to: %s\n", ip)
-	logger.Info("Device IP set via CLI: %s", ip)
+	fmt.Printf("Monitored Device MAC updated to: %s\n", mac)
+	logger.Info("Device MAC set via CLI: %s", mac)
 }
 
 func runSetPaused(paused bool) {

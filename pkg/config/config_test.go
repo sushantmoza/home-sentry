@@ -34,6 +34,58 @@ func TestValidateIP(t *testing.T) {
 	}
 }
 
+func TestValidateMAC(t *testing.T) {
+	tests := []struct {
+		name     string
+		mac      string
+		expected bool
+	}{
+		{"valid colon format", "AA:BB:CC:DD:EE:FF", true},
+		{"valid dash format", "AA-BB-CC-DD-EE-FF", true},
+		{"valid lowercase colon", "aa:bb:cc:dd:ee:ff", true},
+		{"valid lowercase dash", "aa-bb-cc-dd-ee-ff", true},
+		{"valid mixed case", "Aa:Bb:Cc:Dd:Ee:Ff", true},
+		{"empty string", "", true}, // Empty is allowed
+		{"too short", "AA:BB:CC:DD:EE", false},
+		{"too long", "AA:BB:CC:DD:EE:FF:GG", false},
+		{"invalid chars", "GG:HH:II:JJ:KK:LL", false},
+		{"no separator", "AABBCCDDEEFF", false},
+		{"mixed separators", "AA:BB-CC:DD-EE:FF", true}, // Mixed is allowed, we normalize anyway
+		{"IP address", "192.168.1.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ValidateMAC(tt.mac)
+			if result != tt.expected {
+				t.Errorf("ValidateMAC(%q) = %v, want %v", tt.mac, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeMAC(t *testing.T) {
+	tests := []struct {
+		name     string
+		mac      string
+		expected string
+	}{
+		{"colon to dash", "AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff"},
+		{"already dash", "AA-BB-CC-DD-EE-FF", "aa-bb-cc-dd-ee-ff"},
+		{"lowercase colon", "aa:bb:cc:dd:ee:ff", "aa-bb-cc-dd-ee-ff"},
+		{"empty string", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizeMAC(tt.mac)
+			if result != tt.expected {
+				t.Errorf("NormalizeMAC(%q) = %q, want %q", tt.mac, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestDefaultSettings(t *testing.T) {
 	defaults := DefaultSettings()
 
@@ -116,8 +168,8 @@ func TestUpdate(t *testing.T) {
 
 	os.MkdirAll(filepath.Join(tmpDir, "HomeSentry"), 0755)
 
-	// Test update with valid IP
-	err = Update("MyWiFi", "192.168.1.50")
+	// Test update with valid MAC
+	err = Update("MyWiFi", "AA:BB:CC:DD:EE:FF")
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -126,14 +178,18 @@ func TestUpdate(t *testing.T) {
 	if loaded.HomeSSID != "MyWiFi" {
 		t.Errorf("Updated HomeSSID = %q, want %q", loaded.HomeSSID, "MyWiFi")
 	}
-	if loaded.PhoneIP != "192.168.1.50" {
-		t.Errorf("Updated PhoneIP = %q, want %q", loaded.PhoneIP, "192.168.1.50")
+	// MAC should be normalized to lowercase with dashes
+	if loaded.PhoneMAC != "aa-bb-cc-dd-ee-ff" {
+		t.Errorf("Updated PhoneMAC = %q, want %q", loaded.PhoneMAC, "aa-bb-cc-dd-ee-ff")
+	}
+	if loaded.DetectionType != DetectionTypeMAC {
+		t.Errorf("DetectionType = %q, want %q", loaded.DetectionType, DetectionTypeMAC)
 	}
 
-	// Test update with invalid IP
-	err = Update("", "invalid-ip")
+	// Test update with invalid MAC
+	err = Update("", "invalid-mac")
 	if err == nil {
-		t.Error("Update() with invalid IP should return error")
+		t.Error("Update() with invalid MAC should return error")
 	}
 }
 

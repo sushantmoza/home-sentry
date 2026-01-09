@@ -95,19 +95,19 @@ func (s *SentryManager) StartMonitor() {
 			continue
 		}
 
-		log.Printf("Monitor Check: Current SSID=%s, Home SSID=%s, IP=%s", ssid, settings.HomeSSID, settings.PhoneIP)
+		log.Printf("Monitor Check: Current SSID=%s, Home SSID=%s, MAC=%s", ssid, settings.HomeSSID, settings.PhoneMAC)
 
 		if ssid == settings.HomeSSID {
 			// At home, check for phone
-			if settings.PhoneIP != "" && settings.PhoneIP != "0.0.0.0" {
-				alive := network.PingHostWithTimeout(settings.PhoneIP, settings.PingTimeoutMs)
+			if settings.HasDeviceConfigured() {
+				alive := network.IsDeviceOnNetwork(settings.PhoneMAC)
 				if alive {
-					log.Printf("Phone (%s) detected. Safe.", settings.PhoneIP)
+					log.Printf("Phone (MAC: %s) detected. Safe.", settings.PhoneMAC)
 					s.setStatus(StatusMonitoring)
 					s.graceCount = 0
 					s.phoneEverSeen = true
 				} else {
-					log.Printf("WARNING: Phone (%s) NOT detected on home wifi!", settings.PhoneIP)
+					log.Printf("WARNING: Phone (MAC: %s) NOT detected on home wifi!", settings.PhoneMAC)
 
 					// Only enter grace period if we've seen the phone before
 					if s.phoneEverSeen {
@@ -127,7 +127,7 @@ func (s *SentryManager) StartMonitor() {
 					}
 				}
 			} else {
-				log.Println("No phone IP configured. Monitoring disabled.")
+				log.Println("No device configured. Monitoring disabled.")
 				s.setStatus(StatusRoaming)
 			}
 		} else {

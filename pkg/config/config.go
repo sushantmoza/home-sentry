@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // DetectionType specifies how to detect the phone
@@ -34,7 +35,7 @@ func DefaultSettings() Settings {
 		HomeSSID:      "",
 		PhoneIP:       "",
 		PhoneMAC:      "",
-		DetectionType: DetectionTypeIP,
+		DetectionType: DetectionTypeMAC,
 		IsPaused:      false,
 		GraceChecks:   5,
 		PollInterval:  10,
@@ -81,8 +82,9 @@ func NormalizeMAC(mac string) string {
 	if mac == "" {
 		return ""
 	}
-	// Replace colons with dashes and lowercase
-	result := regexp.MustCompile(`[:-]`).ReplaceAllString(mac, "-")
+	// Replace colons with dashes and convert to lowercase
+	result := strings.ToLower(mac)
+	result = strings.ReplaceAll(result, ":", "-")
 	return result
 }
 
@@ -136,19 +138,18 @@ func Save(settings Settings) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func Update(ssid, ip string) error {
+func Update(ssid, mac string) error {
 	settings, _ := Load()
 	if ssid != "" {
 		settings.HomeSSID = ssid
 	}
-	if ip != "" {
-		if !ValidateIP(ip) {
-			return fmt.Errorf("invalid IP address: %s", ip)
+	if mac != "" {
+		if !ValidateMAC(mac) {
+			return fmt.Errorf("invalid MAC address: %s", mac)
 		}
-		settings.PhoneIP = ip
+		settings.PhoneMAC = NormalizeMAC(mac)
+		settings.DetectionType = DetectionTypeMAC
 	}
-
-	fmt.Printf("Updating settings: %+v\n", settings)
 	return Save(settings)
 }
 

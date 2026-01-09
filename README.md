@@ -35,9 +35,9 @@
 ├─────────────────────────────────────────────────────────────┤
 │  Every 10 seconds (configurable):                           │
 │  1. Check current WiFi network                              │
-│  2. If on Home WiFi → Ping your phone                       │
-│  3. Phone responding? → Safe (🟢)                            │
-│  4. Phone missing? → Grace Period (🟡)                       │
+│  2. If on Home WiFi → Check ARP table for phone MAC         │
+│  3. Phone MAC found? → Safe (🟢)                             │
+│  4. Phone MAC missing? → Grace Period (🟡)                   │
 │  5. Missing for 5 checks? → 10s Countdown → Shutdown (🔴)    │
 │  6. Cancel available during countdown!                      │
 └─────────────────────────────────────────────────────────────┘
@@ -58,8 +58,8 @@ home-sentry wifi
 # Set home network
 home-sentry set-home "MyWiFi"
 
-# Set monitored device
-home-sentry set-device 192.168.1.100
+# Set monitored device (MAC address)
+home-sentry set-device AA:BB:CC:DD:EE:FF
 
 # Pause/Resume protection
 home-sentry pause
@@ -82,7 +82,8 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json`:
 ```json
 {
   "home_ssid": "MyHomeWiFi",
-  "phone_ip": "192.168.1.100",
+  "phone_mac": "aa-bb-cc-dd-ee-ff",
+  "detection_type": "mac",
   "is_paused": false,
   "grace_checks": 5,
   "poll_interval_sec": 10,
@@ -95,11 +96,12 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json`:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `home_ssid` | "" | Your home WiFi network name |
-| `phone_ip` | "" | IP address of your phone to monitor |
+| `phone_mac` | "" | MAC address of your phone (AA:BB:CC:DD:EE:FF) |
+| `detection_type` | "mac" | Detection method: "mac" (recommended) or "ip" |
 | `is_paused` | false | Whether protection is paused |
-| `grace_checks` | 5 | Number of failed pings before shutdown |
+| `grace_checks` | 5 | Number of failed checks before shutdown |
 | `poll_interval_sec` | 10 | Seconds between each check |
-| `ping_timeout_ms` | 500 | Ping timeout in milliseconds |
+| `ping_timeout_ms` | 500 | Ping timeout (only used for IP detection) |
 
 ### File Locations
 
@@ -134,14 +136,15 @@ go test -v ./...
 ## Troubleshooting
 
 ### Phone not detected?
-- Ensure your phone has a **static IP** or **DHCP reservation**
+- MAC detection works even if ping is blocked or IP changes
+- Ensure your phone is connected to WiFi (not mobile data)
 - Disable "Private WiFi Address" on iPhone (Settings → WiFi → [network] → Private Address OFF)
-- Some phones block ICMP ping - try disabling firewall temporarily
-- Increase `ping_timeout_ms` to 1000 or higher in settings.json
+- Run `home-sentry scan` to verify your phone appears
+- Check if MAC address format is correct (AA:BB:CC:DD:EE:FF)
 
 ### App shows warning even when phone is connected?
-- The first ping after setup may fail - wait 10-20 seconds
-- Check if phone IP is correct with `home-sentry status`
+- The first check after setup may fail - wait 10-20 seconds
+- Check if phone MAC is correct with `home-sentry status`
 - View logs with `home-sentry logs` for debugging
 
 ### Where are my logs?

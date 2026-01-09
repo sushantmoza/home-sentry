@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-09
+
+### Added
+- **MAC-based detection**: Phone detection now uses MAC address lookup in ARP table instead of ICMP ping
+- Works even when phone IP changes (DHCP)
+- Works even if phone blocks ping
+- No need for static IP or DHCP reservation
+- New `detection_type` setting in config (defaults to "mac")
+
+### Changed
+- `set-device` CLI command now accepts MAC address instead of IP
+- Device selection in tray saves MAC address instead of IP
+- Status display shows Phone MAC instead of Phone IP
+- Default detection type changed from "ip" to "mac"
+
+### Migration
+- Existing users with IP-only configuration will need to re-select their device
+- Run `home-sentry scan` and select your phone to save its MAC address
+
 ## [1.1.0] - 2026-01-08
 
 ### Added
