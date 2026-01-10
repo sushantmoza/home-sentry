@@ -39,9 +39,9 @@
 │  Every 10 seconds (configurable):                           │
 │  1. Check current WiFi network                              │
 │  2. If on Home WiFi → Check ARP table for phone MAC         │
-│  3. Phone MAC found? → Safe (🟢)                             │
-│  4. Phone MAC missing? → Grace Period (🟡)                   │
-│  5. Missing for 5 checks? → 10s Countdown → Shutdown (🔴)    │
+│  3. Phone MAC found? → Safe (🟢)                            │
+│  4. Phone MAC missing? → Grace Period (🟡)                  │
+│  5. Missing for 5 checks? → 10s Countdown → Shutdown (🔴)   │
 │  6. Cancel available during countdown!                      │
 └─────────────────────────────────────────────────────────────┘
 ```
