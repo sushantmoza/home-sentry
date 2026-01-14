@@ -226,7 +226,7 @@ func IsDeviceOnNetwork(mac string) bool {
 func deleteARPEntry(ip string) {
 	cmd := exec.Command("arp", "-d", ip)
 	HideConsole(cmd)
-	cmd.Run() // Ignore errors - may fail if not admin, that's OK
+	_ = cmd.Run() // Ignore errors - may fail if not admin, that's OK
 }
 
 // checkARPForMAC checks if the MAC address exists in the current ARP table

@@ -187,13 +187,19 @@ func onReady() {
 			case <-mPause.ClickedCh:
 				settings, _ := config.Load()
 				if settings.IsPaused {
-					config.SetPaused(false)
-					mPause.SetTitle("⏸️ Pause Protection")
-					logger.Info("Protection resumed")
+					if err := config.SetPaused(false); err != nil {
+						logger.Error("Failed to resume protection: %v", err)
+					} else {
+						mPause.SetTitle("⏸️ Pause Protection")
+						logger.Info("Protection resumed")
+					}
 				} else {
-					config.SetPaused(true)
-					mPause.SetTitle("▶️ Resume Protection")
-					logger.Info("Protection paused")
+					if err := config.SetPaused(true); err != nil {
+						logger.Error("Failed to pause protection: %v", err)
+					} else {
+						mPause.SetTitle("▶️ Resume Protection")
+						logger.Info("Protection paused")
+					}
 				}
 			case <-mAutoStart.ClickedCh:
 				enabled, err := startup.Toggle()
