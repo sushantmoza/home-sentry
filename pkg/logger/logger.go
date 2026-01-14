@@ -140,7 +140,7 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	}
 
 	// Check for daily rotation
-	l.rotateLogFile()
+	_ = l.rotateLogFile()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -159,7 +159,7 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	logLine := fmt.Sprintf("[%s] [%s] [%s] %s\n", timestamp, levelStr, caller, message)
 
 	if l.writers != nil {
-		l.writers.Write([]byte(logLine))
+		_, _ = l.writers.Write([]byte(logLine))
 	}
 }
 
