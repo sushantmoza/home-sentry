@@ -93,9 +93,44 @@ func getLocalIP() (string, string, error) {
 	defer conn.Close()
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 
-	// Get mask - simple assumption /24 for now as fetching valid mask is complex cross-platform without cgo
-	// In a real robust app we'd iterate interfaces.
-	return localAddr.IP.String(), "255.255.255.0", nil
+	localIP := localAddr.IP
+
+	// Iterate network interfaces to find the one matching localIP
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		// Fallback if we can't list interfaces
+		return localIP.String(), "255.255.255.0", nil
+	}
+
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			var mask net.IPMask
+
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+				mask = v.Mask
+			case *net.IPAddr:
+				ip = v.IP
+				mask = ip.DefaultMask()
+			}
+
+			if ip.Equal(localIP) {
+				// Convert mask to dotted decimal format (e.g., 255.255.255.0)
+				// net.IP(mask) works for IPv4 masks (4 bytes)
+				if len(mask) == 4 {
+					return localIP.String(), net.IP(mask).String(), nil
+				}
+			}
+		}
+	}
+
+	return localIP.String(), "255.255.255.0", nil
 }
 
 func pingSweep(myIP string, mask string) {
