@@ -191,6 +191,10 @@ func PingHost(ip string) bool {
 
 func PingHostWithTimeout(ip string, timeoutMs int) bool {
 	if runtime.GOOS == "windows" {
+		// Validate IP address to prevent command injection
+		if net.ParseIP(ip) == nil {
+			return false
+		}
 		cmd := exec.Command("ping", "-n", "1", "-w", strconv.Itoa(timeoutMs), ip)
 		HideConsole(cmd)
 		err := cmd.Run()
@@ -236,6 +240,10 @@ func IsDeviceOnNetwork(mac string) bool {
 
 // deleteARPEntry removes a specific IP from the ARP cache to force fresh lookup
 func deleteARPEntry(ip string) {
+	// Validate IP address to prevent command injection
+	if net.ParseIP(ip) == nil {
+		return
+	}
 	cmd := exec.Command("arp", "-d", ip)
 	HideConsole(cmd)
 	cmd.Run() // Ignore errors - may fail if not admin, that's OK
