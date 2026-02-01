@@ -57,7 +57,7 @@ func Init(logDir string, level LogLevel) error {
 
 // NewLogger creates a new logger instance
 func NewLogger(logDir string, level LogLevel) (*Logger, error) {
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -92,7 +92,7 @@ func (l *Logger) rotateLogFile() error {
 
 	// Open new log file
 	logPath := filepath.Join(l.logDir, fmt.Sprintf("home-sentry-%s.log", today))
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -134,6 +134,27 @@ func (l *Logger) doCleanup(maxAge time.Duration) {
 	}
 }
 
+// sanitizeFormatString removes format specifiers from user input to prevent format string attacks
+func sanitizeFormatString(s string) string {
+	// Replace % with %% to escape format specifiers
+	// This prevents user input like "%s%s%s" from being interpreted as format directives
+	return strings.ReplaceAll(s, "%", "%%")
+}
+
+// sanitizeLogMessage sanitizes all arguments to prevent format string injection
+func sanitizeLogMessage(args []interface{}) []interface{} {
+	sanitized := make([]interface{}, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			sanitized[i] = sanitizeFormatString(v)
+		default:
+			sanitized[i] = arg
+		}
+	}
+	return sanitized
+}
+
 func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	if level < l.level {
 		return
@@ -147,7 +168,10 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	levelStr := levelNames[level]
-	message := fmt.Sprintf(format, args...)
+
+	// Sanitize arguments to prevent format string injection
+	sanitizedArgs := sanitizeLogMessage(args)
+	message := fmt.Sprintf(format, sanitizedArgs...)
 
 	// Get caller info
 	_, file, line, ok := runtime.Caller(2)
