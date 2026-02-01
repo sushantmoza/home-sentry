@@ -59,7 +59,7 @@ func getSettingsPath() (string, error) {
 	}
 
 	dir := filepath.Join(appData, "HomeSentry")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -199,7 +199,7 @@ func Save(settings Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 func Update(ssid, mac string) error {
