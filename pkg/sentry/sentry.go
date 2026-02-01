@@ -258,18 +258,6 @@ func (s *SentryManager) triggerShutdownWithCountdown(settings config.Settings) {
 			s.mu.Lock()
 			s.shutdownPending = false
 			s.mu.Unlock()
-
-			// Check if PIN confirmation is required
-			if settings.RequirePIN && settings.ShutdownPIN != "" {
-				// Show PIN dialog - for now, we just delay and allow manual cancel
-				// A real implementation would show a dialog
-				logger.Info("PIN confirmation required - showing dialog...")
-				s.showNotification("Home Sentry", "Enter PIN to proceed with shutdown")
-				// In a real app, this would wait for PIN input
-				// For now, we add an extra 10 second delay for manual intervention
-				time.Sleep(10 * time.Second)
-			}
-
 			s.executeShutdown(settings)
 			return
 		case <-s.cancelShutdown:

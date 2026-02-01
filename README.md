@@ -115,9 +115,9 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encry
 | `poll_interval_sec` | 10 | Seconds between each check (1-300) |
 | `ping_timeout_ms` | 500 | Ping timeout in milliseconds (100+) |
 | `shutdown_action` | "shutdown" | Action on trigger: shutdown, hibernate, sleep, lock |
-| `require_pin` | false | Require PIN before shutdown |
+| `require_pin` | false | Require PIN for **manual** shutdown via UI (not automatic) |
 | `shutdown_pin` | "" | 4-8 digit PIN (encrypted) |
-| `confirmation_delay_sec` | 10 | Extra delay when PIN is required |
+| `confirmation_delay_sec` | 10 | Extra delay when using PIN for manual shutdown |
 
 ### File Locations
 
@@ -132,7 +132,7 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encry
 
 - **AES-256-GCM Encryption** - All sensitive data is encrypted at rest
 - **Input Validation** - All user inputs are validated and sanitized
-- **PIN Protection** - Optional PIN required before shutdown
+- **PIN Protection** - Optional PIN for **manual** shutdown via UI only (automatic shutdown still works when you're not home)
 - **State Persistence** - Phone detection state survives app restarts
 - **Retry Logic** - Network operations retry automatically for reliability
 
