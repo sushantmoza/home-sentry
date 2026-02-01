@@ -7,14 +7,16 @@ import (
 	"home-sentry/pkg/config"
 	"home-sentry/pkg/logger"
 	"home-sentry/pkg/network"
+	"home-sentry/pkg/ntfy"
 	"home-sentry/pkg/sentry"
 	"home-sentry/pkg/startup"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	"fyne.io/systray"
+	"github.com/getlantern/systray"
 )
 
 // Version is set via ldflags at build time
@@ -28,8 +30,15 @@ var (
 	mPhoneMAC       *systray.MenuItem
 	mPause          *systray.MenuItem
 	mAutoStart      *systray.MenuItem
+	mShutdownTimer  *systray.MenuItem
 	mCancelShutdown *systray.MenuItem
+	mNtfyEnabled    *systray.MenuItem
+	mNtfyTopic      *systray.MenuItem
+	mNtfyTest       *systray.MenuItem
 	deviceSubmenus  []*systray.MenuItem
+	cachedDevices   []network.NetworkDevice
+	hasScanned      bool
+	scanMutex       sync.Mutex
 	ctx             context.Context
 	cancel          context.CancelFunc
 )
@@ -98,8 +107,17 @@ func runWithTray() {
 		sig := <-sigChan
 		logger.Info("Received signal %v, shutting down", sig)
 		cancel()
+		if fyneApp != nil {
+			fyneApp.Quit()
+		}
 		systray.Quit()
 	}()
+
+	// Initialize Fyne app and custom menu
+	initFyneApp()
+
+	// Run Fyne event loop in background
+	go runFyneApp()
 
 	systray.Run(onReady, onExit)
 }
@@ -107,7 +125,10 @@ func runWithTray() {
 func onReady() {
 	systray.SetIcon(assets.IconGreen)
 	systray.SetTitle("Home Sentry")
-	systray.SetTooltip("Home Sentry - Monitoring")
+	systray.SetTooltip("Home Sentry - Click to open menu")
+
+	// Note: We still add a minimal native menu as backup
+	// but the primary interaction is via the Fyne popup window
 
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
@@ -144,7 +165,14 @@ func onReady() {
 	// Actions
 	mSetHome := systray.AddMenuItem("🏠 Set Current WiFi as Home", "Use current network as home")
 	mSelectDevice := systray.AddMenuItem("📱 Select Monitored Device", "Choose device from network")
-	mScanDevices := mSelectDevice.AddSubMenuItem("🔄 Scan Network...", "Scan for devices on your network")
+	mScanDevices := mSelectDevice.AddSubMenuItem("🔄 Scan Network...", "Refresh network device list")
+
+	// Start auto-scan in background
+	go func() {
+		// Wait a moment for tray to settle
+		time.Sleep(1 * time.Second)
+		scanAndPopulateDevices(mSelectDevice, false)
+	}()
 
 	systray.AddSeparator()
 
@@ -157,8 +185,29 @@ func onReady() {
 	}
 	mAutoStart = systray.AddMenuItem(autoStartText, "Start Home Sentry when Windows starts")
 
+	mShutdownTimer = systray.AddMenuItem("⏱ Shutdown Timer", "Set delay before shutdown")
+	setupShutdownTimerMenu()
+
 	mCancelShutdown = systray.AddMenuItem("⚠️ Cancel Shutdown", "Cancel pending shutdown")
 	mCancelShutdown.Hide()
+
+	// ntfy.sh notifications submenu
+	mNtfy := systray.AddMenuItem("🔔 Phone Notifications", "Configure ntfy.sh notifications")
+	ntfyEnabledText := "Enable Notifications"
+	if settings.NtfyEnabled {
+		ntfyEnabledText = "✅ Notifications Enabled"
+	}
+	mNtfyEnabled = mNtfy.AddSubMenuItem(ntfyEnabledText, "Toggle ntfy.sh notifications")
+	topicDisplay := "Not Set"
+	if settings.NtfyTopic != "" {
+		topicDisplay = settings.NtfyTopic
+	}
+	mNtfyTopic = mNtfy.AddSubMenuItem(fmt.Sprintf("📝 Topic: %s", topicDisplay), "ntfy.sh topic name")
+	mNtfyTopic.Disable()
+	mNtfyTest = mNtfy.AddSubMenuItem("🧪 Send Test Notification", "Test that notifications work")
+	if !settings.NtfyEnabled || settings.NtfyTopic == "" {
+		mNtfyTest.Disable()
+	}
 
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("❌ Quit", "Exit Home Sentry")
@@ -167,6 +216,11 @@ func onReady() {
 	sentryManager = sentry.NewSentryManager()
 	sentryManager.SetStatusCallback(onStatusChange)
 	go sentryManager.StartMonitor()
+
+	// Start ntfy command listener if enabled
+	if settings.NtfyEnabled && settings.NtfyTopic != "" {
+		go startNtfyCommandListener(settings)
+	}
 
 	// Handle menu clicks
 	go func() {
@@ -183,7 +237,7 @@ func onReady() {
 				}
 				updateInfoDisplay()
 			case <-mScanDevices.ClickedCh:
-				scanAndPopulateDevices(mSelectDevice)
+				scanAndPopulateDevices(mSelectDevice, true)
 			case <-mPause.ClickedCh:
 				settings, _ := config.Load()
 				if settings.IsPaused {
@@ -216,9 +270,60 @@ func onReady() {
 					}
 					logger.Info("Shutdown cancelled by user")
 				}
+			case <-mNtfyEnabled.ClickedCh:
+				settings, _ := config.Load()
+				if settings.NtfyEnabled {
+					// Disable ntfy
+					settings.NtfyEnabled = false
+					config.Save(settings)
+					mNtfyEnabled.SetTitle("Enable Notifications")
+					mNtfyTest.Disable()
+					logger.Info("ntfy notifications disabled")
+				} else {
+					// Enable ntfy - prompt for topic if not set
+					if settings.NtfyTopic == "" {
+						// Generate a random topic
+						settings.NtfyTopic = fmt.Sprintf("home-sentry-%d", time.Now().UnixNano()%1000000)
+						logger.Info("Generated ntfy topic: %s", settings.NtfyTopic)
+					}
+					settings.NtfyEnabled = true
+					config.Save(settings)
+					mNtfyEnabled.SetTitle("✅ Notifications Enabled")
+					mNtfyTopic.SetTitle(fmt.Sprintf("📝 Topic: %s", settings.NtfyTopic))
+					mNtfyTest.Enable()
+					logger.Info("ntfy notifications enabled with topic: %s", settings.NtfyTopic)
+				}
+			case <-mNtfyTest.ClickedCh:
+				settings, _ := config.Load()
+				if settings.NtfyEnabled && settings.NtfyTopic != "" {
+					client := ntfy.NewClient(settings.NtfyServer, settings.NtfyTopic)
+					if err := client.SendTestNotification(); err != nil {
+						logger.Error("Failed to send test notification: %v", err)
+						if mStatus != nil {
+							mStatus.SetTitle("❌ ntfy test failed")
+						}
+					} else {
+						logger.Info("Test notification sent to topic: %s", settings.NtfyTopic)
+						if mStatus != nil {
+							mStatus.SetTitle("✅ Test notification sent!")
+						}
+					}
+				}
 			case <-mQuit.ClickedCh:
 				logger.Info("User requested quit")
 				systray.Quit()
+
+			// Handle clicks on informational items (just logger debug)
+			case <-mStatus.ClickedCh:
+				logger.Debug("Status clicked")
+			case <-mLocation.ClickedCh:
+				logger.Debug("Location clicked")
+			case <-mWiFi.ClickedCh:
+				logger.Debug("WiFi clicked")
+			case <-mPhoneMAC.ClickedCh:
+				logger.Debug("Phone MAC clicked")
+			case <-mVersion.ClickedCh:
+				logger.Debug("Version clicked")
 			}
 		}
 	}()
@@ -236,6 +341,65 @@ func onReady() {
 			}
 		}
 	}()
+}
+
+// startNtfyCommandListener starts an always-on listener for phone commands
+func startNtfyCommandListener(settings config.Settings) {
+	client := ntfy.NewClient(settings.NtfyServer, settings.NtfyTopic)
+
+	err := client.StartCommandListener(func(cmd ntfy.Command) {
+		logger.Info("Received ntfy command: %s", cmd)
+
+		switch cmd {
+		case ntfy.CmdPause:
+			settings, _ := config.Load()
+			if !settings.IsPaused {
+				config.SetPaused(true)
+				if mPause != nil {
+					mPause.SetTitle("▶️ Resume Protection")
+				}
+				if mStatus != nil {
+					mStatus.SetTitle("Status: Paused ⏸")
+				}
+				logger.Info("Protection paused via ntfy")
+				// Send confirmation
+				go client.SendPausedNotification()
+			}
+
+		case ntfy.CmdResume:
+			settings, _ := config.Load()
+			if settings.IsPaused {
+				config.SetPaused(false)
+				if mPause != nil {
+					mPause.SetTitle("⏸️ Pause Protection")
+				}
+				if mStatus != nil {
+					mStatus.SetTitle("Status: Resumed")
+				}
+				logger.Info("Protection resumed via ntfy")
+				// Send confirmation
+				go client.SendResumedNotification()
+			}
+
+		case ntfy.CmdStatus:
+			settings, _ := config.Load()
+			ssid := network.GetCurrentSSID()
+			var status string
+			if settings.IsPaused {
+				status = "Paused"
+			} else if ssid == settings.HomeSSID {
+				status = "At Home - Monitoring"
+			} else {
+				status = "Roaming"
+			}
+			go client.SendStatusNotification(status, ssid, settings.PhoneMAC, settings.IsPaused)
+			logger.Info("Status sent via ntfy")
+		}
+	})
+
+	if err != nil {
+		logger.Error("Failed to start ntfy command listener: %v", err)
+	}
 }
 
 func updateInfoDisplay() {
@@ -262,6 +426,10 @@ func updateInfoDisplay() {
 		}
 	}
 
+	if mShutdownTimer != nil {
+		mShutdownTimer.SetTitle(fmt.Sprintf("⏱ Shutdown Timer (%ds)", settings.ShutdownDelay))
+	}
+
 	if sentryManager != nil && mCancelShutdown != nil {
 		if sentryManager.IsShutdownPending() {
 			mCancelShutdown.Show()
@@ -271,8 +439,40 @@ func updateInfoDisplay() {
 	}
 }
 
-func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
-	// Clear previous device entries
+func setupShutdownTimerMenu() {
+	delays := []struct {
+		Seconds int
+		Label   string
+	}{
+		{10, "10 Seconds"},
+		{30, "30 Seconds"},
+		{60, "1 Minute"},
+		{300, "5 Minutes"},
+	}
+
+	for _, d := range delays {
+		m := mShutdownTimer.AddSubMenuItem(d.Label, fmt.Sprintf("Wait %s before shutdown", d.Label))
+		go func(val int, m *systray.MenuItem) {
+			for range m.ClickedCh {
+				config.SetShutdownDelay(val)
+				updateInfoDisplay()
+			}
+		}(d.Seconds, m)
+	}
+}
+
+func scanAndPopulateDevices(parentMenu *systray.MenuItem, forceRefresh bool) {
+	scanMutex.Lock()
+	defer scanMutex.Unlock()
+
+	// Use cache if available and not forced
+	if !forceRefresh && hasScanned && len(cachedDevices) > 0 {
+		logger.Info("Using cached network devices")
+		populateDeviceMenu(parentMenu, cachedDevices)
+		return
+	}
+
+	// Helper to clear menu
 	for _, item := range deviceSubmenus {
 		item.Hide()
 	}
@@ -281,10 +481,22 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 	if mStatus != nil {
 		mStatus.SetTitle("⏳ Scanning network...")
 	}
-	logger.Info("Starting network scan")
+	logger.Info("Starting network scan (force=%v)", forceRefresh)
 
 	devices := network.ScanNetworkDevices()
+	cachedDevices = devices
+	hasScanned = true
+
 	logger.Info("Found %d devices", len(devices))
+	populateDeviceMenu(parentMenu, devices)
+}
+
+func populateDeviceMenu(parentMenu *systray.MenuItem, devices []network.NetworkDevice) {
+	// Clear previous device entries (again, to be safe if called from cache path)
+	for _, item := range deviceSubmenus {
+		item.Hide()
+	}
+	deviceSubmenus = nil
 
 	if len(devices) == 0 {
 		noDevices := parentMenu.AddSubMenuItem("❌ No devices found", "Try again or check WiFi connection")
@@ -302,18 +514,20 @@ func scanAndPopulateDevices(parentMenu *systray.MenuItem) {
 	deviceSubmenus = append(deviceSubmenus, header)
 
 	for _, device := range devices {
-		// Format: "📱 Hostname (192.168.1.x)"
-		// Or just IP if hostname unknown
-		var deviceName string
+		// Format: "📱 IP / MAC / Vendor" (as requested)
+		// Include Hostname if known
+		var label string
 		if device.Hostname != "Unknown" && device.Hostname != "" {
-			deviceName = fmt.Sprintf("📱 %s (%s)", device.Hostname, device.IP)
+			label = fmt.Sprintf("📱 %s (%s) / %s / %s", device.Hostname, device.IP, device.MAC, device.Vendor)
 		} else {
-			deviceName = fmt.Sprintf("📱 %s", device.IP)
+			label = fmt.Sprintf("📱 %s / %s / %s", device.IP, device.MAC, device.Vendor)
 		}
 
-		// Tooltip shows MAC address
-		tooltip := fmt.Sprintf("Click to monitor • MAC: %s", device.MAC)
-		deviceItem := parentMenu.AddSubMenuItem(deviceName, tooltip)
+		// Tooltip shows detailed info
+		tooltip := fmt.Sprintf("Click to monitor • IP: %s\nMAC: %s\nVendor: %s\nHostname: %s",
+			device.IP, device.MAC, device.Vendor, device.Hostname)
+
+		deviceItem := parentMenu.AddSubMenuItem(label, tooltip)
 		deviceSubmenus = append(deviceSubmenus, deviceItem)
 
 		// Capture values for the goroutine
