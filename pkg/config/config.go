@@ -19,43 +19,35 @@ const (
 )
 
 type Settings struct {
-	HomeSSID          string        `json:"home_ssid"`
-	PhoneIP           string        `json:"phone_ip"`
-	PhoneMAC          string        `json:"phone_mac"`
-	DetectionType     DetectionType `json:"detection_type"`
-	IsPaused          bool          `json:"is_paused"`
-	GraceChecks       int           `json:"grace_checks"`
-	PollInterval      int           `json:"poll_interval_sec"`
-	PingTimeoutMs     int           `json:"ping_timeout_ms"`
-	NtfyEnabled       bool          `json:"ntfy_enabled"`
-	NtfyTopic         string        `json:"ntfy_topic"`
-	NtfyServer        string        `json:"ntfy_server"`
-	ShutdownDelay     int           `json:"shutdown_delay_sec"`
-	ShutdownPIN       string        `json:"shutdown_pin"`
-	RequirePIN        bool          `json:"require_pin"`
-	ShutdownAction    string        `json:"shutdown_action"`
-	ConfirmationDelay int           `json:"confirmation_delay_sec"`
+	HomeSSID       string        `json:"home_ssid"`
+	PhoneIP        string        `json:"phone_ip"`
+	PhoneMAC       string        `json:"phone_mac"`
+	DetectionType  DetectionType `json:"detection_type"`
+	IsPaused       bool          `json:"is_paused"`
+	GraceChecks    int           `json:"grace_checks"`
+	PollInterval   int           `json:"poll_interval_sec"`
+	PingTimeoutMs  int           `json:"ping_timeout_ms"`
+	ShutdownDelay  int           `json:"shutdown_delay_sec"`
+	ShutdownPIN    string        `json:"shutdown_pin"`
+	RequirePIN     bool          `json:"require_pin"`
+	ShutdownAction string        `json:"shutdown_action"`
 }
 
 // DefaultSettings returns settings with sensible defaults
 func DefaultSettings() Settings {
 	return Settings{
-		HomeSSID:          "",
-		PhoneIP:           "",
-		PhoneMAC:          "",
-		DetectionType:     DefaultDetectionType,
-		IsPaused:          false,
-		GraceChecks:       DefaultGraceChecks,
-		PollInterval:      DefaultPollInterval,
-		PingTimeoutMs:     DefaultPingTimeoutMs,
-		NtfyEnabled:       false,
-		NtfyTopic:         "",
-		NtfyServer:        DefaultNtfyServer,
-		ShutdownDelay:     DefaultShutdownDelay,
-		ShutdownPIN:       "",
-		RequirePIN:        false,
-		ShutdownAction:    DefaultShutdownAction,
-		ConfirmationDelay: DefaultConfirmationDelay,
+		HomeSSID:       "",
+		PhoneIP:        "",
+		PhoneMAC:       "",
+		DetectionType:  DefaultDetectionType,
+		IsPaused:       false,
+		GraceChecks:    DefaultGraceChecks,
+		PollInterval:   DefaultPollInterval,
+		PingTimeoutMs:  DefaultPingTimeoutMs,
+		ShutdownDelay:  DefaultShutdownDelay,
+		ShutdownPIN:    "",
+		RequirePIN:     false,
+		ShutdownAction: DefaultShutdownAction,
 	}
 }
 

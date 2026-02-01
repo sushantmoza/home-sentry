@@ -9,7 +9,6 @@ const (
 	DefaultPingTimeoutMs     = 500
 	DefaultShutdownDelay     = 10
 	DefaultShutdownAction    = ShutdownActionShutdown
-	DefaultNtfyServer        = "https://ntfy.sh"
 	DefaultDetectionType     = DetectionTypeMAC
 	DefaultRetryAttempts     = 3
 	DefaultRetryDelay        = 500 * time.Millisecond

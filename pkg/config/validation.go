@@ -20,9 +20,6 @@ var (
 	// PIN validation - 4-8 digits only
 	pinRegex = regexp.MustCompile(`^\d{4,8}$`)
 
-	// Topic name validation for ntfy (alphanumeric, hyphens, underscores)
-	topicRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-
 	// General dangerous character pattern (for basic XSS prevention)
 	dangerousChars = regexp.MustCompile(`[<>"'&]|javascript:|data:|vbscript:`)
 )
@@ -105,40 +102,6 @@ func SanitizePIN(pin string) (string, error) {
 	}
 
 	return pin, nil
-}
-
-// SanitizeTopic validates and sanitizes a topic name
-func SanitizeTopic(topic string) (string, error) {
-	topic = strings.TrimSpace(topic)
-	if topic == "" {
-		return "", nil
-	}
-
-	if !topicRegex.MatchString(topic) {
-		return "", NewValidationError("Invalid topic name", "Topic must be alphanumeric with hyphens/underscores (1-64 chars)")
-	}
-
-	return strings.ToLower(topic), nil
-}
-
-// SanitizeServerURL validates a server URL (basic validation)
-func SanitizeServerURL(url string) (string, error) {
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return "", nil
-	}
-
-	// Must start with http:// or https://
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return "", NewValidationError("Invalid URL", "URL must start with http:// or https://")
-	}
-
-	// Check for dangerous protocols
-	if dangerousChars.MatchString(url) {
-		return "", NewValidationError("URL contains invalid characters", "URL contains potentially dangerous content")
-	}
-
-	return url, nil
 }
 
 // IsPrintableASCII checks if a string contains only printable ASCII characters

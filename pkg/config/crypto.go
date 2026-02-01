@@ -238,15 +238,6 @@ func EncryptSettings(settings *Settings) (*Settings, error) {
 		encrypted.ShutdownPIN = enc
 	}
 
-	// Encrypt NtfyTopic (could contain sensitive info)
-	if settings.NtfyTopic != "" {
-		enc, err := encryptString(settings.NtfyTopic, key)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt NtfyTopic: %w", err)
-		}
-		encrypted.NtfyTopic = enc
-	}
-
 	return &encrypted, nil
 }
 
@@ -293,15 +284,6 @@ func DecryptSettings(settings *Settings) (*Settings, error) {
 			return nil, fmt.Errorf("failed to decrypt ShutdownPIN: %w", err)
 		}
 		decrypted.ShutdownPIN = dec
-	}
-
-	// Decrypt NtfyTopic
-	if settings.NtfyTopic != "" {
-		dec, err := decryptString(settings.NtfyTopic, key)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt NtfyTopic: %w", err)
-		}
-		decrypted.NtfyTopic = dec
 	}
 
 	return &decrypted, nil
