@@ -10,20 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.0] - 2026-02-01
 
 ### Added
-- **Security: AES-256 Encryption** - All sensitive settings (MAC, SSID, PIN, IP, ntfy topic) are now encrypted with AES-GCM
+- **Security: AES-256 Encryption** - All sensitive settings (MAC, SSID, PIN, IP) are now encrypted with AES-GCM
   - Encryption key stored securely in user's profile directory
   - Automatic migration from unencrypted legacy settings
   - Transparent encryption/decryption - no user action required
-- **Security: PIN Confirmation** - Optional PIN requirement before shutdown
+- **Security: PIN Protection** - Optional PIN for manual shutdown attempts
   - Configure 4-8 digit PIN in settings
-  - Extra confirmation window when PIN is enabled
-  - Prevents accidental or malicious shutdowns
+  - Prevents accidental manual shutdowns through UI
+  - Does NOT affect automatic protection (works when you're away)
 - **Security: Input Validation** - Comprehensive validation for all user inputs
   - SSID sanitization (removes dangerous characters)
   - MAC address validation with multiple format support
   - IP address validation
   - PIN validation (digits only)
-  - Topic name validation for ntfy
 - **Multiple Shutdown Actions** - Choose what happens when protection triggers
   - Shutdown (default) - Full system shutdown
   - Hibernate - Save state and hibernate
@@ -48,6 +47,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings file now encrypted - no plaintext sensitive data
 - Input sanitization prevents injection attacks
 - Constant-time PIN comparison to prevent timing attacks
+
+### Fixed
+- **CRITICAL: PowerShell Injection** - Fixed arbitrary code execution via malicious WiFi SSID names
+  - Added `escapePowerShellString()` to sanitize notification text
+  - Single quotes now escaped as `''` in PowerShell strings
+  - Prevents command injection in toast notifications
+- **CRITICAL: Command Injection** - Fixed command injection in network operations
+  - Added IP validation before `ping` command execution
+  - Added IP validation before `arp -d` command execution
+  - Uses `net.ParseIP()` to validate IP format before shell execution
+
+### Removed
+- **ntfy.sh Integration** - Removed external notification service to simplify app
+  - Remote phone commands no longer supported
+  - App is now fully local/offline (no external dependencies)
+  - Reduces attack surface and complexity
 
 ## [1.3.6] - 2026-01-09
 

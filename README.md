@@ -10,7 +10,6 @@
 ## Features
 
 - 🔐 **Encrypted Storage** - All sensitive data encrypted with AES-256-GCM
-- 🔢 **PIN Protection** - Optional PIN confirmation before shutdown
 - 🟢 **Safe** - Phone detected on home WiFi
 - 🟡 **Warning** - Phone missing, grace period active
 - 🔴 **Shutdown** - Grace period expired, protect your data
@@ -96,10 +95,7 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encry
   "grace_checks": 5,
   "poll_interval_sec": 10,
   "ping_timeout_ms": 500,
-  "shutdown_action": "shutdown",
-  "require_pin": false,
-  "shutdown_pin": "",
-  "confirmation_delay_sec": 10
+  "shutdown_action": "shutdown"
 }
 ```
 
@@ -115,10 +111,6 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encry
 | `poll_interval_sec` | 10 | Seconds between each check (1-300) |
 | `ping_timeout_ms` | 500 | Ping timeout in milliseconds (100+) |
 | `shutdown_action` | "shutdown" | Action on trigger: shutdown, hibernate, sleep, lock |
-| `require_pin` | false | Require PIN for **manual** shutdown via UI (not automatic) |
-| `shutdown_pin` | "" | 4-8 digit PIN (encrypted) |
-| `confirmation_delay_sec` | 10 | Extra delay when using PIN for manual shutdown |
-
 ### File Locations
 
 | File | Location |
@@ -132,7 +124,6 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encry
 
 - **AES-256-GCM Encryption** - All sensitive data is encrypted at rest
 - **Input Validation** - All user inputs are validated and sanitized
-- **PIN Protection** - Optional PIN for **manual** shutdown via UI only (automatic shutdown still works when you're not home)
 - **State Persistence** - Phone detection state survives app restarts
 - **Retry Logic** - Network operations retry automatically for reliability
 
