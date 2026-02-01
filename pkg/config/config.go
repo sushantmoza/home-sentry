@@ -19,27 +19,43 @@ const (
 )
 
 type Settings struct {
-	HomeSSID      string        `json:"home_ssid"`
-	PhoneIP       string        `json:"phone_ip"`
-	PhoneMAC      string        `json:"phone_mac"`
-	DetectionType DetectionType `json:"detection_type"`
-	IsPaused      bool          `json:"is_paused"`
-	GraceChecks   int           `json:"grace_checks"`
-	PollInterval  int           `json:"poll_interval_sec"`
-	PingTimeoutMs int           `json:"ping_timeout_ms"`
+	HomeSSID          string        `json:"home_ssid"`
+	PhoneIP           string        `json:"phone_ip"`
+	PhoneMAC          string        `json:"phone_mac"`
+	DetectionType     DetectionType `json:"detection_type"`
+	IsPaused          bool          `json:"is_paused"`
+	GraceChecks       int           `json:"grace_checks"`
+	PollInterval      int           `json:"poll_interval_sec"`
+	PingTimeoutMs     int           `json:"ping_timeout_ms"`
+	NtfyEnabled       bool          `json:"ntfy_enabled"`
+	NtfyTopic         string        `json:"ntfy_topic"`
+	NtfyServer        string        `json:"ntfy_server"`
+	ShutdownDelay     int           `json:"shutdown_delay_sec"`
+	ShutdownPIN       string        `json:"shutdown_pin"`
+	RequirePIN        bool          `json:"require_pin"`
+	ShutdownAction    string        `json:"shutdown_action"`
+	ConfirmationDelay int           `json:"confirmation_delay_sec"`
 }
 
 // DefaultSettings returns settings with sensible defaults
 func DefaultSettings() Settings {
 	return Settings{
-		HomeSSID:      "",
-		PhoneIP:       "",
-		PhoneMAC:      "",
-		DetectionType: DetectionTypeMAC,
-		IsPaused:      false,
-		GraceChecks:   5,
-		PollInterval:  10,
-		PingTimeoutMs: 500,
+		HomeSSID:          "",
+		PhoneIP:           "",
+		PhoneMAC:          "",
+		DetectionType:     DefaultDetectionType,
+		IsPaused:          false,
+		GraceChecks:       DefaultGraceChecks,
+		PollInterval:      DefaultPollInterval,
+		PingTimeoutMs:     DefaultPingTimeoutMs,
+		NtfyEnabled:       false,
+		NtfyTopic:         "",
+		NtfyServer:        DefaultNtfyServer,
+		ShutdownDelay:     DefaultShutdownDelay,
+		ShutdownPIN:       "",
+		RequirePIN:        false,
+		ShutdownAction:    DefaultShutdownAction,
+		ConfirmationDelay: DefaultConfirmationDelay,
 	}
 }
 
@@ -88,6 +104,41 @@ func NormalizeMAC(mac string) string {
 	return result
 }
 
+// ValidatePIN checks if the given string is a valid PIN (4-8 digits)
+func ValidatePIN(pin string) bool {
+	if pin == "" {
+		return true // Empty PIN is valid (disables PIN requirement)
+	}
+	if len(pin) < MinPINLength || len(pin) > MaxPINLength {
+		return false
+	}
+	// PIN must be all digits
+	for _, c := range pin {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateShutdownAction checks if the action is valid
+func ValidateShutdownAction(action string) bool {
+	switch action {
+	case ShutdownActionShutdown, ShutdownActionHibernate, ShutdownActionLock, ShutdownActionSleep:
+		return true
+	default:
+		return false
+	}
+}
+
+// VerifyPIN checks if the provided PIN matches the stored PIN
+func (s Settings) VerifyPIN(pin string) bool {
+	if !s.RequirePIN || s.ShutdownPIN == "" {
+		return true // No PIN required
+	}
+	return s.ShutdownPIN == pin
+}
+
 func Load() (Settings, error) {
 	path, err := getSettingsPath()
 	if err != nil {
@@ -107,22 +158,37 @@ func Load() (Settings, error) {
 		return DefaultSettings(), err
 	}
 
-	// Ensure minimum values
-	if settings.GraceChecks < 1 {
-		settings.GraceChecks = 5
-	}
-	if settings.PollInterval < 1 {
-		settings.PollInterval = 10
-	}
-	if settings.PingTimeoutMs < 100 {
-		settings.PingTimeoutMs = 500
-	}
-	// Default to IP detection if not set
-	if settings.DetectionType == "" {
-		settings.DetectionType = DetectionTypeIP
+	// Decrypt sensitive fields
+	decrypted, err := DecryptSettings(&settings)
+	if err != nil {
+		// If decryption fails, might be unencrypted legacy settings
+		// Log the error but continue with potentially unencrypted data
+		fmt.Printf("Warning: Could not decrypt settings (may be legacy format): %v\n", err)
+		decrypted = &settings
 	}
 
-	return settings, nil
+	// Ensure minimum values
+	if decrypted.GraceChecks < 1 {
+		decrypted.GraceChecks = 5
+	}
+	if decrypted.PollInterval < 1 {
+		decrypted.PollInterval = 10
+	}
+	if decrypted.PingTimeoutMs < 100 {
+		decrypted.PingTimeoutMs = 500
+	}
+	if decrypted.ShutdownDelay < 5 {
+		decrypted.ShutdownDelay = 10
+	}
+	// Default to IP detection if not set
+	if decrypted.DetectionType == "" {
+		decrypted.DetectionType = DetectionTypeIP
+	}
+	if decrypted.ShutdownAction == "" {
+		decrypted.ShutdownAction = DefaultShutdownAction
+	}
+
+	return *decrypted, nil
 }
 
 func Save(settings Settings) error {
@@ -131,7 +197,13 @@ func Save(settings Settings) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(settings, "", "  ")
+	// Encrypt sensitive fields before saving
+	encrypted, err := EncryptSettings(&settings)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt settings: %w", err)
+	}
+
+	data, err := json.MarshalIndent(encrypted, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -141,13 +213,18 @@ func Save(settings Settings) error {
 func Update(ssid, mac string) error {
 	settings, _ := Load()
 	if ssid != "" {
-		settings.HomeSSID = ssid
+		sanitizedSSID, err := SanitizeSSID(ssid)
+		if err != nil {
+			return err
+		}
+		settings.HomeSSID = sanitizedSSID
 	}
 	if mac != "" {
-		if !ValidateMAC(mac) {
-			return fmt.Errorf("invalid MAC address: %s", mac)
+		sanitizedMAC, err := SanitizeMAC(mac)
+		if err != nil {
+			return err
 		}
-		settings.PhoneMAC = NormalizeMAC(mac)
+		settings.PhoneMAC = sanitizedMAC
 		settings.DetectionType = DetectionTypeMAC
 	}
 	return Save(settings)
@@ -158,17 +235,19 @@ func UpdateDevice(ip, mac string, detectionType DetectionType) error {
 	settings, _ := Load()
 
 	if ip != "" {
-		if !ValidateIP(ip) {
-			return fmt.Errorf("invalid IP address: %s", ip)
+		sanitizedIP, err := SanitizeIP(ip)
+		if err != nil {
+			return err
 		}
-		settings.PhoneIP = ip
+		settings.PhoneIP = sanitizedIP
 	}
 
 	if mac != "" {
-		if !ValidateMAC(mac) {
-			return fmt.Errorf("invalid MAC address: %s", mac)
+		sanitizedMAC, err := SanitizeMAC(mac)
+		if err != nil {
+			return err
 		}
-		settings.PhoneMAC = NormalizeMAC(mac)
+		settings.PhoneMAC = sanitizedMAC
 	}
 
 	if detectionType != "" {
@@ -191,6 +270,55 @@ func SetPaused(paused bool) error {
 	settings, _ := Load()
 	settings.IsPaused = paused
 	fmt.Printf("Updating paused status: %v\n", paused)
+	return Save(settings)
+}
+
+func SetShutdownDelay(seconds int) error {
+	settings, _ := Load()
+	if seconds < ShutdownMinDelay {
+		return fmt.Errorf("shutdown delay must be at least %d seconds", ShutdownMinDelay)
+	}
+	if seconds > ShutdownMaxDelay {
+		return fmt.Errorf("shutdown delay must be at most %d seconds", ShutdownMaxDelay)
+	}
+	settings.ShutdownDelay = seconds
+	fmt.Printf("Updating shutdown delay: %d seconds\n", seconds)
+	return Save(settings)
+}
+
+// SetShutdownPIN sets the PIN required for shutdown confirmation
+func SetShutdownPIN(pin string) error {
+	if !ValidatePIN(pin) {
+		return fmt.Errorf("PIN must be %d-%d digits", MinPINLength, MaxPINLength)
+	}
+	settings, _ := Load()
+	settings.ShutdownPIN = pin
+	settings.RequirePIN = pin != ""
+	fmt.Printf("Updating shutdown PIN: %s\n", func() string {
+		if pin == "" {
+			return "disabled"
+		}
+		return "enabled"
+	}())
+	return Save(settings)
+}
+
+// SetRequirePIN toggles whether a PIN is required for shutdown
+func SetRequirePIN(require bool) error {
+	settings, _ := Load()
+	settings.RequirePIN = require
+	fmt.Printf("Updating PIN requirement: %v\n", require)
+	return Save(settings)
+}
+
+// SetShutdownAction sets the action to take when protection triggers
+func SetShutdownAction(action string) error {
+	if !ValidateShutdownAction(action) {
+		return fmt.Errorf("invalid shutdown action: %s (valid: shutdown, hibernate, lock, sleep)", action)
+	}
+	settings, _ := Load()
+	settings.ShutdownAction = action
+	fmt.Printf("Updating shutdown action: %s\n", action)
 	return Save(settings)
 }
 
