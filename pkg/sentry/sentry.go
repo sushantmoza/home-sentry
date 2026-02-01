@@ -63,7 +63,7 @@ func getStateFilePath() string {
 		return "sentry-state.json"
 	}
 	dir := filepath.Join(appData, "HomeSentry")
-	os.MkdirAll(dir, 0755)
+	os.MkdirAll(dir, 0700)
 	return filepath.Join(dir, "sentry-state.json")
 }
 
@@ -149,14 +149,19 @@ func (s *SentryManager) StartMonitor() {
 			continue
 		}
 
-		logger.Info("Monitor Check: Current SSID=%s, Home SSID=%s, MAC=%s", ssid, settings.HomeSSID, settings.PhoneMAC)
+		// Sanitize SSID and MAC before logging to prevent format string injection
+		safeSSID := strings.ReplaceAll(ssid, "%", "%%")
+		safeHomeSSID := strings.ReplaceAll(settings.HomeSSID, "%", "%%")
+		safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
+		logger.Info("Monitor Check: Current SSID=%s, Home SSID=%s, MAC=%s", safeSSID, safeHomeSSID, safeMAC)
 
 		if ssid == settings.HomeSSID {
 			// At home, check for phone
 			if settings.HasDeviceConfigured() {
 				alive := network.IsDeviceOnNetwork(settings.PhoneMAC)
 				if alive {
-					logger.Info("Phone (MAC: %s) detected. Safe.", settings.PhoneMAC)
+					safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
+					logger.Info("Phone (MAC: %s) detected. Safe.", safeMAC)
 					s.setStatus(StatusMonitoring)
 					s.graceCount = 0
 					if !s.phoneEverSeen {
@@ -165,7 +170,8 @@ func (s *SentryManager) StartMonitor() {
 						logger.Info("Phone first seen - state persisted")
 					}
 				} else {
-					logger.Info("WARNING: Phone (MAC: %s) NOT detected on home wifi!", settings.PhoneMAC)
+					safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
+					logger.Info("WARNING: Phone (MAC: %s) NOT detected on home wifi!", safeMAC)
 
 					// Only enter grace period if we've seen the phone before
 					if s.phoneEverSeen {

@@ -129,7 +129,10 @@ func onReady() {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
 
-	logger.Info("Tray ready. SSID: %s, Home: %s, Phone MAC: %s", currentSSID, settings.HomeSSID, settings.PhoneMAC)
+	sanitizedCurrentSSID, _ := config.SanitizeSSID(currentSSID)
+	sanitizedHomeSSID, _ := config.SanitizeSSID(settings.HomeSSID)
+	sanitizedPhoneMAC, _ := config.SanitizeMAC(settings.PhoneMAC)
+	logger.Info("Tray ready. SSID: %s, Home: %s, Phone MAC: %s", sanitizedCurrentSSID, sanitizedHomeSSID, sanitizedPhoneMAC)
 
 	// Status info
 	mStatus = systray.AddMenuItem("Status: Starting...", "Current status")
@@ -206,7 +209,8 @@ func onReady() {
 				if err := config.Update(ssid, ""); err != nil {
 					logger.Error("Failed to set home SSID: %v", err)
 				} else {
-					logger.Info("Home SSID set to: %s", ssid)
+					sanitizedSSID, _ := config.SanitizeSSID(ssid)
+					logger.Info("Home SSID set to: %s", sanitizedSSID)
 				}
 				updateInfoDisplay()
 			case <-mScanDevices.ClickedCh:
@@ -417,7 +421,9 @@ func populateDeviceMenu(parentMenu *systray.MenuItem, devices []network.NetworkD
 			if err := config.Update("", mac); err != nil {
 				logger.Error("Failed to set device MAC: %v", err)
 			} else {
-				logger.Info("Device MAC set to: %s (%s)", mac, name)
+				sanitizedMAC, _ := config.SanitizeMAC(mac)
+				sanitizedName, _ := config.SanitizeSSID(name)
+				logger.Info("Device MAC set to: %s (%s)", sanitizedMAC, sanitizedName)
 			}
 			updateInfoDisplay()
 			if mStatus != nil {
@@ -568,7 +574,8 @@ func runSetHome(ssid string) {
 		return
 	}
 	fmt.Printf("Home SSID updated to: %s\n", ssid)
-	logger.Info("Home SSID set via CLI: %s", ssid)
+	sanitizedSSID, _ := config.SanitizeSSID(ssid)
+	logger.Info("Home SSID set via CLI: %s", sanitizedSSID)
 }
 
 func runSetDevice(mac string) {
@@ -583,7 +590,8 @@ func runSetDevice(mac string) {
 		return
 	}
 	fmt.Printf("Monitored Device MAC updated to: %s\n", mac)
-	logger.Info("Device MAC set via CLI: %s", mac)
+	sanitizedMAC, _ := config.SanitizeMAC(mac)
+	logger.Info("Device MAC set via CLI: %s", sanitizedMAC)
 }
 
 func runSetPaused(paused bool) {
