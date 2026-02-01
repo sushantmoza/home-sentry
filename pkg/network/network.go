@@ -15,11 +15,22 @@ type NetworkDevice struct {
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname"`
 	MAC      string `json:"mac"`
+	Vendor   string `json:"vendor"`
 }
 
 func GetCurrentSSID() string {
 	if runtime.GOOS == "windows" {
-		return getWindowsSSID()
+		ssid, err := RetryWithResult(DefaultRetryConfig(), func() (string, error) {
+			ssid := getWindowsSSID()
+			if ssid == "Disconnected" || ssid == "Unknown" {
+				return ssid, fmt.Errorf("wifi not connected")
+			}
+			return ssid, nil
+		})
+		if err != nil {
+			return "Unknown"
+		}
+		return ssid
 	}
 	return "Simulated WiFi"
 }
@@ -164,6 +175,7 @@ func scanARPWindows() []NetworkDevice {
 					IP:       ip,
 					Hostname: hostname,
 					MAC:      mac,
+					Vendor:   GetVendor(mac),
 				})
 				mu.Unlock()
 			}(ip, mac)
