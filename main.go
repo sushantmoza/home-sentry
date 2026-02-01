@@ -7,7 +7,6 @@ import (
 	"home-sentry/pkg/config"
 	"home-sentry/pkg/logger"
 	"home-sentry/pkg/network"
-	"home-sentry/pkg/ntfy"
 	"home-sentry/pkg/sentry"
 	"home-sentry/pkg/startup"
 	"os"
@@ -32,9 +31,6 @@ var (
 	mAutoStart      *systray.MenuItem
 	mShutdownTimer  *systray.MenuItem
 	mCancelShutdown *systray.MenuItem
-	mNtfyEnabled    *systray.MenuItem
-	mNtfyTopic      *systray.MenuItem
-	mNtfyTest       *systray.MenuItem
 	deviceSubmenus  []*systray.MenuItem
 	cachedDevices   []network.NetworkDevice
 	hasScanned      bool
@@ -191,24 +187,6 @@ func onReady() {
 	mCancelShutdown = systray.AddMenuItem("⚠️ Cancel Shutdown", "Cancel pending shutdown")
 	mCancelShutdown.Hide()
 
-	// ntfy.sh notifications submenu
-	mNtfy := systray.AddMenuItem("🔔 Phone Notifications", "Configure ntfy.sh notifications")
-	ntfyEnabledText := "Enable Notifications"
-	if settings.NtfyEnabled {
-		ntfyEnabledText = "✅ Notifications Enabled"
-	}
-	mNtfyEnabled = mNtfy.AddSubMenuItem(ntfyEnabledText, "Toggle ntfy.sh notifications")
-	topicDisplay := "Not Set"
-	if settings.NtfyTopic != "" {
-		topicDisplay = settings.NtfyTopic
-	}
-	mNtfyTopic = mNtfy.AddSubMenuItem(fmt.Sprintf("📝 Topic: %s", topicDisplay), "ntfy.sh topic name")
-	mNtfyTopic.Disable()
-	mNtfyTest = mNtfy.AddSubMenuItem("🧪 Send Test Notification", "Test that notifications work")
-	if !settings.NtfyEnabled || settings.NtfyTopic == "" {
-		mNtfyTest.Disable()
-	}
-
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("❌ Quit", "Exit Home Sentry")
 
@@ -216,11 +194,6 @@ func onReady() {
 	sentryManager = sentry.NewSentryManager()
 	sentryManager.SetStatusCallback(onStatusChange)
 	go sentryManager.StartMonitor()
-
-	// Start ntfy command listener if enabled
-	if settings.NtfyEnabled && settings.NtfyTopic != "" {
-		go startNtfyCommandListener(settings)
-	}
 
 	// Handle menu clicks
 	go func() {
@@ -270,45 +243,6 @@ func onReady() {
 					}
 					logger.Info("Shutdown cancelled by user")
 				}
-			case <-mNtfyEnabled.ClickedCh:
-				settings, _ := config.Load()
-				if settings.NtfyEnabled {
-					// Disable ntfy
-					settings.NtfyEnabled = false
-					config.Save(settings)
-					mNtfyEnabled.SetTitle("Enable Notifications")
-					mNtfyTest.Disable()
-					logger.Info("ntfy notifications disabled")
-				} else {
-					// Enable ntfy - prompt for topic if not set
-					if settings.NtfyTopic == "" {
-						// Generate a random topic
-						settings.NtfyTopic = fmt.Sprintf("home-sentry-%d", time.Now().UnixNano()%1000000)
-						logger.Info("Generated ntfy topic: %s", settings.NtfyTopic)
-					}
-					settings.NtfyEnabled = true
-					config.Save(settings)
-					mNtfyEnabled.SetTitle("✅ Notifications Enabled")
-					mNtfyTopic.SetTitle(fmt.Sprintf("📝 Topic: %s", settings.NtfyTopic))
-					mNtfyTest.Enable()
-					logger.Info("ntfy notifications enabled with topic: %s", settings.NtfyTopic)
-				}
-			case <-mNtfyTest.ClickedCh:
-				settings, _ := config.Load()
-				if settings.NtfyEnabled && settings.NtfyTopic != "" {
-					client := ntfy.NewClient(settings.NtfyServer, settings.NtfyTopic)
-					if err := client.SendTestNotification(); err != nil {
-						logger.Error("Failed to send test notification: %v", err)
-						if mStatus != nil {
-							mStatus.SetTitle("❌ ntfy test failed")
-						}
-					} else {
-						logger.Info("Test notification sent to topic: %s", settings.NtfyTopic)
-						if mStatus != nil {
-							mStatus.SetTitle("✅ Test notification sent!")
-						}
-					}
-				}
 			case <-mQuit.ClickedCh:
 				logger.Info("User requested quit")
 				systray.Quit()
@@ -341,65 +275,6 @@ func onReady() {
 			}
 		}
 	}()
-}
-
-// startNtfyCommandListener starts an always-on listener for phone commands
-func startNtfyCommandListener(settings config.Settings) {
-	client := ntfy.NewClient(settings.NtfyServer, settings.NtfyTopic)
-
-	err := client.StartCommandListener(func(cmd ntfy.Command) {
-		logger.Info("Received ntfy command: %s", cmd)
-
-		switch cmd {
-		case ntfy.CmdPause:
-			settings, _ := config.Load()
-			if !settings.IsPaused {
-				config.SetPaused(true)
-				if mPause != nil {
-					mPause.SetTitle("▶️ Resume Protection")
-				}
-				if mStatus != nil {
-					mStatus.SetTitle("Status: Paused ⏸")
-				}
-				logger.Info("Protection paused via ntfy")
-				// Send confirmation
-				go client.SendPausedNotification()
-			}
-
-		case ntfy.CmdResume:
-			settings, _ := config.Load()
-			if settings.IsPaused {
-				config.SetPaused(false)
-				if mPause != nil {
-					mPause.SetTitle("⏸️ Pause Protection")
-				}
-				if mStatus != nil {
-					mStatus.SetTitle("Status: Resumed")
-				}
-				logger.Info("Protection resumed via ntfy")
-				// Send confirmation
-				go client.SendResumedNotification()
-			}
-
-		case ntfy.CmdStatus:
-			settings, _ := config.Load()
-			ssid := network.GetCurrentSSID()
-			var status string
-			if settings.IsPaused {
-				status = "Paused"
-			} else if ssid == settings.HomeSSID {
-				status = "At Home - Monitoring"
-			} else {
-				status = "Roaming"
-			}
-			go client.SendStatusNotification(status, ssid, settings.PhoneMAC, settings.IsPaused)
-			logger.Info("Status sent via ntfy")
-		}
-	})
-
-	if err != nil {
-		logger.Error("Failed to start ntfy command listener: %v", err)
-	}
 }
 
 func updateInfoDisplay() {
