@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"home-sentry/pkg/config"
 	"home-sentry/pkg/network"
-	"home-sentry/pkg/ntfy"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,23 +206,6 @@ func (s *SentryManager) triggerShutdownWithCountdown(settings config.Settings) {
 	// Show local notification
 	s.showNotification("Home Sentry Alert", fmt.Sprintf("Phone not detected! Shutting down in %d seconds...", settings.ShutdownDelay))
 
-	// Send ntfy notification if enabled
-	var ntfyCmdCh <-chan ntfy.Command
-	var ntfyClient *ntfy.Client
-	if settings.NtfyEnabled && settings.NtfyTopic != "" {
-		ntfyClient = ntfy.NewClient(settings.NtfyServer, settings.NtfyTopic)
-		if err := ntfyClient.SendShutdownNotification(settings.ShutdownDelay); err != nil {
-			logger.Info("Failed to send ntfy notification: %v", err)
-		} else {
-			// Start listening for cancel commands
-			var err error
-			ntfyCmdCh, err = ntfyClient.StartShutdownCancelListener()
-			if err != nil {
-				logger.Info("Failed to start ntfy cancel listener: %v", err)
-			}
-		}
-	}
-
 	// Play initial warning sound
 	s.playWarningSound()
 
@@ -236,13 +219,6 @@ func (s *SentryManager) triggerShutdownWithCountdown(settings config.Settings) {
 	// Ticker for periodic beeps
 	beepTicker := time.NewTicker(2 * time.Second)
 	defer beepTicker.Stop()
-
-	// Cleanup ntfy listener when done
-	defer func() {
-		if ntfyClient != nil {
-			ntfyClient.StopListener()
-		}
-	}()
 
 	countdown := settings.ShutdownDelay - 2 // Already played first beep, next beep shows (delay-2) seconds
 	for {
@@ -265,28 +241,6 @@ func (s *SentryManager) triggerShutdownWithCountdown(settings config.Settings) {
 			logger.Info("Shutdown countdown cancelled (local)")
 			s.setStatus(StatusMonitoring)
 			return
-		case cmd := <-ntfyCmdCh:
-			// Shutdown was cancelled via ntfy
-			s.mu.Lock()
-			s.shutdownPending = false
-			s.graceCount = 0
-			s.mu.Unlock()
-
-			if cmd == ntfy.CmdCancelAndPause {
-				// Cancel and pause protection until resumed
-				logger.Info("Shutdown cancelled via ntfy - PAUSING protection")
-				config.SetPaused(true)
-				s.setStatus(StatusPaused)
-				// Send confirmation notification
-				if ntfyClient != nil {
-					go ntfyClient.SendPausedNotification()
-				}
-			} else {
-				// Cancel only - keep monitoring
-				logger.Info("Shutdown cancelled via ntfy - resuming monitoring")
-				s.setStatus(StatusMonitoring)
-			}
-			return
 		}
 	}
 }
@@ -301,8 +255,21 @@ func (s *SentryManager) playWarningSound() {
 	}
 }
 
+// escapePowerShellString escapes single quotes for safe use in PowerShell strings
+func escapePowerShellString(s string) string {
+	// In PowerShell, single quotes are escaped by doubling them
+	s = strings.ReplaceAll(s, "'", "''")
+	// Remove null bytes for safety
+	s = strings.ReplaceAll(s, "\x00", "")
+	return s
+}
+
 func (s *SentryManager) showNotification(title, message string) {
 	if runtime.GOOS == "windows" {
+		// Escape inputs to prevent PowerShell injection
+		safeTitle := escapePowerShellString(title)
+		safeMessage := escapePowerShellString(message)
+
 		// Use PowerShell for toast notification
 		script := fmt.Sprintf(`
 			Add-Type -AssemblyName System.Windows.Forms
@@ -315,7 +282,7 @@ func (s *SentryManager) showNotification(title, message string) {
 			$balloon.ShowBalloonTip(10000)
 			Start-Sleep -Seconds 10
 			$balloon.Dispose()
-		`, title, message)
+		`, safeTitle, safeMessage)
 		cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command", script)
 		network.HideConsole(cmd)
 		go cmd.Run() // Run async
