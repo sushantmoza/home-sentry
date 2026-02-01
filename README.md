@@ -9,6 +9,8 @@
 
 ## Features
 
+- 🔐 **Encrypted Storage** - All sensitive data encrypted with AES-256-GCM
+- 🔢 **PIN Protection** - Optional PIN confirmation before shutdown
 - 🟢 **Safe** - Phone detected on home WiFi
 - 🟡 **Warning** - Phone missing, grace period active
 - 🔴 **Shutdown** - Grace period expired, protect your data
@@ -20,6 +22,9 @@
 - 🚀 **Auto-Start** - Optionally start with Windows
 - 🏠 **Location Status** - Shows "At Home" or "Roaming" in tray
 - 📝 **File Logging** - Daily log rotation with auto-cleanup
+- 🔄 **Retry Logic** - Automatic retries for network operations
+- 💾 **State Persistence** - Phone detection state survives app restart
+- 🛡️ **Input Validation** - All inputs sanitized and validated
 
 ## Quick Start
 
@@ -80,7 +85,7 @@ home-sentry
 
 ## Configuration
 
-Settings are stored in `%APPDATA%\HomeSentry\settings.json`:
+Settings are stored in `%APPDATA%\HomeSentry\settings.json` (automatically encrypted):
 
 ```json
 {
@@ -90,7 +95,11 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json`:
   "is_paused": false,
   "grace_checks": 5,
   "poll_interval_sec": 10,
-  "ping_timeout_ms": 500
+  "ping_timeout_ms": 500,
+  "shutdown_action": "shutdown",
+  "require_pin": false,
+  "shutdown_pin": "",
+  "confirmation_delay_sec": 10
 }
 ```
 
@@ -98,20 +107,34 @@ Settings are stored in `%APPDATA%\HomeSentry\settings.json`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `home_ssid` | "" | Your home WiFi network name |
-| `phone_mac` | "" | MAC address of your phone (AA:BB:CC:DD:EE:FF) |
+| `home_ssid` | "" | Your home WiFi network name (encrypted) |
+| `phone_mac` | "" | MAC address of your phone (AA:BB:CC:DD:EE:FF) (encrypted) |
 | `detection_type` | "mac" | Detection method: "mac" (recommended) or "ip" |
 | `is_paused` | false | Whether protection is paused |
-| `grace_checks` | 5 | Number of failed checks before shutdown |
-| `poll_interval_sec` | 10 | Seconds between each check |
-| `ping_timeout_ms` | 500 | Ping timeout (only used for IP detection) |
+| `grace_checks` | 5 | Number of failed checks before shutdown (1-100) |
+| `poll_interval_sec` | 10 | Seconds between each check (1-300) |
+| `ping_timeout_ms` | 500 | Ping timeout in milliseconds (100+) |
+| `shutdown_action` | "shutdown" | Action on trigger: shutdown, hibernate, sleep, lock |
+| `require_pin` | false | Require PIN before shutdown |
+| `shutdown_pin` | "" | 4-8 digit PIN (encrypted) |
+| `confirmation_delay_sec` | 10 | Extra delay when PIN is required |
 
 ### File Locations
 
 | File | Location |
 |------|----------|
-| Settings | `%APPDATA%\HomeSentry\settings.json` |
+| Settings | `%APPDATA%\HomeSentry\settings.json` (encrypted) |
+| State | `%APPDATA%\HomeSentry\sentry-state.json` |
 | Logs | `%APPDATA%\HomeSentry\logs\home-sentry-YYYY-MM-DD.log` |
+| Encryption Key | `%APPDATA%\HomeSentry\.key` |
+
+### Security Features
+
+- **AES-256-GCM Encryption** - All sensitive data is encrypted at rest
+- **Input Validation** - All user inputs are validated and sanitized
+- **PIN Protection** - Optional PIN required before shutdown
+- **State Persistence** - Phone detection state survives app restarts
+- **Retry Logic** - Network operations retry automatically for reliability
 
 ## Building from Source
 

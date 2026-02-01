@@ -7,13 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
+## [1.4.0] - 2026-02-01
 
-## [Unreleased]
+### Added
+- **Security: AES-256 Encryption** - All sensitive settings (MAC, SSID, PIN, IP, ntfy topic) are now encrypted with AES-GCM
+  - Encryption key stored securely in user's profile directory
+  - Automatic migration from unencrypted legacy settings
+  - Transparent encryption/decryption - no user action required
+- **Security: PIN Confirmation** - Optional PIN requirement before shutdown
+  - Configure 4-8 digit PIN in settings
+  - Extra confirmation window when PIN is enabled
+  - Prevents accidental or malicious shutdowns
+- **Security: Input Validation** - Comprehensive validation for all user inputs
+  - SSID sanitization (removes dangerous characters)
+  - MAC address validation with multiple format support
+  - IP address validation
+  - PIN validation (digits only)
+  - Topic name validation for ntfy
+- **Multiple Shutdown Actions** - Choose what happens when protection triggers
+  - Shutdown (default) - Full system shutdown
+  - Hibernate - Save state and hibernate
+  - Sleep - Sleep mode (maintains RAM state)
+  - Lock - Lock the workstation (no data loss)
+- **State Persistence** - phoneEverSeen state is now saved to disk
+  - Prevents false triggers after app restart
+  - Grace period only activates after phone was detected once
+- **Retry Logic** - Network operations automatically retry with exponential backoff
+  - 3 retry attempts with configurable delay
+  - Improves reliability on unstable networks
+- **Centralized Constants** - All magic numbers extracted to `pkg/config/constants.go`
+  - Easier configuration management
+  - Better maintainability
 
-## [Unreleased]
+### Changed
+- Standardized all logging to use custom logger package (replaced 22 log.Printf/log.Println calls)
+- Improved error messages with user-friendly validation errors
+- Settings validation enforces min/max values for all numeric fields
 
-## [Unreleased]
+### Security
+- Settings file now encrypted - no plaintext sensitive data
+- Input sanitization prevents injection attacks
+- Constant-time PIN comparison to prevent timing attacks
 
 ## [1.3.6] - 2026-01-09
 
