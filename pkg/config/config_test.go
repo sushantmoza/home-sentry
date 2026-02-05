@@ -117,7 +117,9 @@ func TestLoadSave(t *testing.T) {
 	defer os.Setenv("APPDATA", origAppData)
 
 	// Create the HomeSentry directory
-	os.MkdirAll(filepath.Join(tmpDir, "HomeSentry"), 0755)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "HomeSentry"), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test saving
 	settings := Settings{
@@ -166,7 +168,9 @@ func TestUpdate(t *testing.T) {
 	os.Setenv("APPDATA", tmpDir)
 	defer os.Setenv("APPDATA", origAppData)
 
-	os.MkdirAll(filepath.Join(tmpDir, "HomeSentry"), 0755)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "HomeSentry"), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test update with valid MAC
 	err = Update("MyWiFi", "AA:BB:CC:DD:EE:FF")
@@ -205,12 +209,16 @@ func TestLoadMinimumValues(t *testing.T) {
 	defer os.Setenv("APPDATA", origAppData)
 
 	hsDir := filepath.Join(tmpDir, "HomeSentry")
-	os.MkdirAll(hsDir, 0755)
+	if err := os.MkdirAll(hsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Write settings with invalid minimum values
 	settingsPath := filepath.Join(hsDir, "settings.json")
 	content := `{"grace_checks": 0, "poll_interval_sec": 0, "ping_timeout_ms": 50}`
-	os.WriteFile(settingsPath, []byte(content), 0644)
+	if err := os.WriteFile(settingsPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	loaded, err := Load()
 	if err != nil {

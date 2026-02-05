@@ -89,7 +89,7 @@ func PlayWarningSound() {
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command",
 		"[System.Media.SystemSounds]::Exclamation.Play()")
 	hideConsole(cmd)
-	cmd.Run()
+	_ = cmd.Run()
 }
 
 // PlayCriticalSound plays multiple beeps for critical alert
@@ -98,5 +98,5 @@ func PlayCriticalSound() {
 	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command",
 		"[console]::beep(1000, 500); Start-Sleep -Milliseconds 200; [console]::beep(1000, 500)")
 	hideConsole(cmd)
-	cmd.Run()
+	_ = cmd.Run()
 }
