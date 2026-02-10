@@ -109,13 +109,20 @@ func (s *SentryManager) saveState() {
 }
 
 func (s *SentryManager) SetStatusCallback(cb func(SentryStatus)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.StatusCallback = cb
 }
 
 func (s *SentryManager) setStatus(status SentryStatus) {
+	s.mu.Lock()
 	s.status = status
-	if s.StatusCallback != nil {
-		s.StatusCallback(status)
+	cb := s.StatusCallback
+	s.mu.Unlock()
+
+	// Call callback outside lock to avoid deadlocks with UI code
+	if cb != nil {
+		cb(status)
 	}
 }
 
@@ -162,9 +169,9 @@ func (s *SentryManager) StartMonitor() {
 		}
 
 		// Sanitize SSID and MAC before logging to prevent format string injection
-		safeSSID := strings.ReplaceAll(ssid, "%", "%%")
-		safeHomeSSID := strings.ReplaceAll(settings.HomeSSID, "%", "%%")
-		safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
+		safeSSID := config.SanitizeDisplayString(ssid)
+		safeHomeSSID := config.SanitizeDisplayString(settings.HomeSSID)
+		safeMAC := config.SanitizeDisplayString(settings.PhoneMAC)
 		logger.Info("Monitor Check: Current SSID=%s, Home SSID=%s, MAC=%s", safeSSID, safeHomeSSID, safeMAC)
 
 		if ssid == settings.HomeSSID {
@@ -172,26 +179,39 @@ func (s *SentryManager) StartMonitor() {
 			if settings.HasDeviceConfigured() {
 				alive := network.IsDeviceOnNetwork(settings.PhoneMAC)
 				if alive {
-					safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
 					logger.Info("Phone (MAC: %s) detected. Safe.", safeMAC)
 					s.setStatus(StatusMonitoring)
+
+					s.mu.Lock()
 					s.graceCount = 0
-					if !s.phoneEverSeen {
+					everSeen := s.phoneEverSeen
+					if !everSeen {
 						s.phoneEverSeen = true
+					}
+					s.mu.Unlock()
+
+					if !everSeen {
 						s.saveState()
 						logger.Info("Phone first seen - state persisted")
 					}
 				} else {
-					safeMAC := strings.ReplaceAll(settings.PhoneMAC, "%", "%%")
 					logger.Info("WARNING: Phone (MAC: %s) NOT detected on home wifi!", safeMAC)
 
-					// Only enter grace period if we've seen the phone before
-					if s.phoneEverSeen {
-						s.graceCount++
-						s.setStatus(StatusGracePeriod)
-						logger.Info("Status: GRACE PERIOD (%d/%d)", s.graceCount, settings.GraceChecks)
+					s.mu.Lock()
+					everSeen := s.phoneEverSeen
+					s.mu.Unlock()
 
-						if s.graceCount >= settings.GraceChecks {
+					// Only enter grace period if we've seen the phone before
+					if everSeen {
+						s.mu.Lock()
+						s.graceCount++
+						currentGrace := s.graceCount
+						s.mu.Unlock()
+
+						s.setStatus(StatusGracePeriod)
+						logger.Info("Status: GRACE PERIOD (%d/%d)", currentGrace, settings.GraceChecks)
+
+						if currentGrace >= settings.GraceChecks {
 							s.setStatus(StatusShutdownImminent)
 							logger.Info("CRITICAL: Grace period expired. SHUTDOWN IMMINENT!")
 							s.triggerShutdownWithCountdown(settings)
@@ -208,7 +228,9 @@ func (s *SentryManager) StartMonitor() {
 			}
 		} else {
 			s.setStatus(StatusRoaming)
+			s.mu.Lock()
 			s.graceCount = 0
+			s.mu.Unlock()
 			logger.Info("Status: Roaming (Not on Home WiFi).")
 		}
 

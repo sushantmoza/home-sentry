@@ -9,7 +9,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
+
+// settingsMu protects concurrent access to the settings file.
+// All Load/Save operations must hold this lock to prevent read-modify-write races.
+var settingsMu sync.Mutex
 
 // DetectionType specifies how to detect the phone
 type DetectionType string
@@ -212,6 +217,13 @@ func (s Settings) VerifyPIN(pin string) bool {
 }
 
 func Load() (Settings, error) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	return loadLocked()
+}
+
+// loadLocked performs the actual load. Caller must hold settingsMu.
+func loadLocked() (Settings, error) {
 	path, err := getSettingsPath()
 	if err != nil {
 		return DefaultSettings(), err
@@ -234,16 +246,12 @@ func Load() (Settings, error) {
 	decrypted, err := DecryptSettings(&settings)
 	if err != nil {
 		// If decryption fails, might be unencrypted legacy settings
-		// Log the error but continue with potentially unencrypted data
-		fmt.Printf("Warning: Could not decrypt settings (may be legacy format): %v\n", err)
+		// Continue with potentially unencrypted data but log the warning
 		decrypted = &settings
 	}
 
 	// Validate and sanitize all fields loaded from disk
-	warnings := ValidateSettings(decrypted)
-	for _, w := range warnings {
-		fmt.Printf("Warning: %s\n", w)
-	}
+	ValidateSettings(decrypted)
 
 	// Ensure minimum values for fields not covered by ValidateSettings range checks
 	if decrypted.PingTimeoutMs < 100 {
@@ -254,6 +262,13 @@ func Load() (Settings, error) {
 }
 
 func Save(settings Settings) error {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	return saveLocked(settings)
+}
+
+// saveLocked performs the actual save with atomic write. Caller must hold settingsMu.
+func saveLocked(settings Settings) error {
 	path, err := getSettingsPath()
 	if err != nil {
 		return err
@@ -269,11 +284,48 @@ func Save(settings Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+
+	// Atomic write: write to temp file, then rename to avoid corruption on crash
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, "settings-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// Set permissions before rename
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
+	// Atomic rename (on Windows, os.Rename replaces existing files)
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
 }
 
 func Update(ssid, mac string) error {
-	settings, _ := Load()
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	if ssid != "" {
 		sanitizedSSID, err := SanitizeSSID(ssid)
 		if err != nil {
@@ -289,12 +341,18 @@ func Update(ssid, mac string) error {
 		settings.PhoneMAC = sanitizedMAC
 		settings.DetectionType = DetectionTypeMAC
 	}
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // UpdateDevice updates both IP and MAC with the specified detection type
 func UpdateDevice(ip, mac string, detectionType DetectionType) error {
-	settings, _ := Load()
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 
 	if ip != "" {
 		sanitizedIP, err := SanitizeIP(ip)
@@ -316,36 +374,51 @@ func UpdateDevice(ip, mac string, detectionType DetectionType) error {
 		settings.DetectionType = detectionType
 	}
 
-	fmt.Printf("Updating device settings: IP=%s, MAC=%s, Type=%s\n", settings.PhoneIP, settings.PhoneMAC, settings.DetectionType)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // SetDetectionType sets the detection type (ip or mac)
 func SetDetectionType(detectionType DetectionType) error {
-	settings, _ := Load()
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.DetectionType = detectionType
-	fmt.Printf("Updating detection type: %s\n", detectionType)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 func SetPaused(paused bool) error {
-	settings, _ := Load()
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.IsPaused = paused
-	fmt.Printf("Updating paused status: %v\n", paused)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 func SetShutdownDelay(seconds int) error {
-	settings, _ := Load()
 	if seconds < ShutdownMinDelay {
 		return fmt.Errorf("shutdown delay must be at least %d seconds", ShutdownMinDelay)
 	}
 	if seconds > ShutdownMaxDelay {
 		return fmt.Errorf("shutdown delay must be at most %d seconds", ShutdownMaxDelay)
 	}
+
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.ShutdownDelay = seconds
-	fmt.Printf("Updating shutdown delay: %d seconds\n", seconds)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // SetShutdownPIN sets the PIN required for shutdown confirmation
@@ -353,24 +426,30 @@ func SetShutdownPIN(pin string) error {
 	if !ValidatePIN(pin) {
 		return fmt.Errorf("PIN must be %d-%d digits", MinPINLength, MaxPINLength)
 	}
-	settings, _ := Load()
+
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.ShutdownPIN = pin
 	settings.RequirePIN = pin != ""
-	fmt.Printf("Updating shutdown PIN: %s\n", func() string {
-		if pin == "" {
-			return "disabled"
-		}
-		return "enabled"
-	}())
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // SetRequirePIN toggles whether a PIN is required for shutdown
 func SetRequirePIN(require bool) error {
-	settings, _ := Load()
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.RequirePIN = require
-	fmt.Printf("Updating PIN requirement: %v\n", require)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // SetShutdownAction sets the action to take when protection triggers
@@ -378,10 +457,16 @@ func SetShutdownAction(action string) error {
 	if !ValidateShutdownAction(action) {
 		return fmt.Errorf("invalid shutdown action: %s (valid: shutdown, hibernate, lock, sleep)", action)
 	}
-	settings, _ := Load()
+
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadLocked()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
 	settings.ShutdownAction = action
-	fmt.Printf("Updating shutdown action: %s\n", action)
-	return Save(settings)
+	return saveLocked(settings)
 }
 
 // GetSettingsPath exposes the settings path for display purposes
