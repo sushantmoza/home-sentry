@@ -3,7 +3,6 @@ package startup
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -81,22 +80,4 @@ func Toggle() (enabled bool, err error) {
 	}
 	err = Enable()
 	return true, err
-}
-
-// PlayWarningSound plays a Windows system warning beep
-func PlayWarningSound() {
-	// Use PowerShell to play system sound
-	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command",
-		"[System.Media.SystemSounds]::Exclamation.Play()")
-	hideConsole(cmd)
-	cmd.Run()
-}
-
-// PlayCriticalSound plays multiple beeps for critical alert
-func PlayCriticalSound() {
-	// Play beep sound using built-in Windows beep
-	cmd := exec.Command("powershell", "-WindowStyle", "Hidden", "-Command",
-		"[console]::beep(1000, 500); Start-Sleep -Milliseconds 200; [console]::beep(1000, 500)")
-	hideConsole(cmd)
-	cmd.Run()
 }

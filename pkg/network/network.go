@@ -84,10 +84,10 @@ func getWindowsSSID() string {
 func ScanNetworkDevices() []NetworkDevice {
 	if runtime.GOOS == "windows" {
 		// 1. Determine local subnet
-		ip, subnet, err := getLocalIP()
+		ip, _, err := getLocalIP()
 		if err == nil {
 			// 2. Ping sweep to populate ARP table
-			pingSweep(ip, subnet)
+			pingSweep(ip)
 		}
 		// 3. Read ARP table
 		return scanARPWindows()
@@ -110,7 +110,7 @@ func getLocalIP() (string, string, error) {
 	return localAddr.IP.String(), "255.255.255.0", nil
 }
 
-func pingSweep(myIP string, mask string) {
+func pingSweep(myIP string) {
 	// Simple assumption: /24 network
 	parts := strings.Split(myIP, ".")
 	if len(parts) != 4 {
@@ -246,9 +246,9 @@ func IsDeviceOnNetwork(mac string) bool {
 		PingHostWithTimeout(lastKnownIP, 500)
 	} else {
 		// No cached IP - do a quick ping sweep to find the device
-		ip, subnet, err := getLocalIP()
+		ip, _, err := getLocalIP()
 		if err == nil {
-			pingSweep(ip, subnet)
+			pingSweep(ip)
 		}
 	}
 

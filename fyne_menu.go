@@ -78,9 +78,12 @@ func buildCustomMenu() {
 		devices := network.ScanNetworkDevices()
 		if len(devices) > 0 {
 			// Devices are already sanitized by ScanNetworkDevices
-			config.Update("", devices[0].MAC)
-			safeMAC := config.SanitizeDisplayString(devices[0].MAC)
-			logger.Info("Auto-selected first device: %s", safeMAC)
+			if err := config.Update("", devices[0].MAC); err != nil {
+				logger.Error("Failed to set device MAC: %v", err)
+			} else {
+				safeMAC := config.SanitizeDisplayString(devices[0].MAC)
+				logger.Info("Auto-selected first device: %s", safeMAC)
+			}
 		}
 		updateCustomMenuDisplay()
 	})

@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -107,74 +106,6 @@ func getKeyPath() string {
 	os.MkdirAll(appDir, 0700)
 
 	return filepath.Join(appDir, ".key")
-}
-
-// SecureString represents an encrypted string value
-type SecureString struct {
-	encrypted string
-	plaintext string
-	key       []byte
-}
-
-// NewSecureString creates a new SecureString from plaintext
-func NewSecureString(plaintext string) (*SecureString, error) {
-	key, err := getOrCreateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	encrypted, err := encryptString(plaintext, key)
-	if err != nil {
-		return nil, err
-	}
-
-	return &SecureString{
-		encrypted: encrypted,
-		plaintext: plaintext,
-		key:       key,
-	}, nil
-}
-
-// NewSecureStringFromEncrypted creates a SecureString from an encrypted value
-func NewSecureStringFromEncrypted(encrypted string) (*SecureString, error) {
-	key, err := getOrCreateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	plaintext, err := decryptString(encrypted, key)
-	if err != nil {
-		return nil, err
-	}
-
-	return &SecureString{
-		encrypted: encrypted,
-		plaintext: plaintext,
-		key:       key,
-	}, nil
-}
-
-// String returns the plaintext value (for internal use only)
-func (s *SecureString) String() string {
-	return s.plaintext
-}
-
-// Encrypted returns the encrypted value for storage
-func (s *SecureString) Encrypted() string {
-	return s.encrypted
-}
-
-// IsEmpty returns true if the string is empty
-func (s *SecureString) IsEmpty() bool {
-	return s.plaintext == ""
-}
-
-// Equals compares two secure strings in constant time
-func (s *SecureString) Equals(other *SecureString) bool {
-	if s == nil || other == nil {
-		return s == other
-	}
-	return subtle.ConstantTimeCompare([]byte(s.plaintext), []byte(other.plaintext)) == 1
 }
 
 // EncryptSettings encrypts sensitive fields in Settings

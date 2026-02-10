@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 )
@@ -86,8 +85,7 @@ func ValidateMAC(mac string) bool {
 	if mac == "" {
 		return true
 	}
-	// Support both formats: 00:11:22:33:44:55 and 00-11-22-33-44-55
-	macRegex := regexp.MustCompile(`^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$`)
+	// Uses pre-compiled macRegex from validation.go
 	return macRegex.MatchString(mac)
 }
 

@@ -36,6 +36,7 @@ type Logger struct {
 	logDir      string
 	currentDate string
 	writers     io.Writer
+	done        chan struct{}
 }
 
 var defaultLogger *Logger
@@ -64,6 +65,7 @@ func NewLogger(logDir string, level LogLevel) (*Logger, error) {
 	l := &Logger{
 		level:  level,
 		logDir: logDir,
+		done:   make(chan struct{}),
 	}
 
 	if err := l.rotateLogFile(); err != nil {
@@ -111,8 +113,13 @@ func (l *Logger) cleanupOldLogs(maxAge time.Duration) {
 	// Run immediately on startup
 	l.doCleanup(maxAge)
 
-	for range ticker.C {
-		l.doCleanup(maxAge)
+	for {
+		select {
+		case <-ticker.C:
+			l.doCleanup(maxAge)
+		case <-l.done:
+			return
+		}
 	}
 }
 
@@ -194,8 +201,16 @@ func (l *Logger) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// Close closes the log file
+// Close stops the cleanup goroutine and closes the log file
 func (l *Logger) Close() error {
+	// Signal cleanup goroutine to stop
+	select {
+	case <-l.done:
+		// Already closed
+	default:
+		close(l.done)
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.file != nil {

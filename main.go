@@ -425,18 +425,19 @@ func populateDeviceMenu(parentMenu *systray.MenuItem, devices []network.NetworkD
 		}
 
 		go func(mac string, name string, item *systray.MenuItem) {
-			<-item.ClickedCh
-			if err := config.Update("", mac); err != nil {
-				logger.Error("Failed to set device MAC: %v", err)
-			} else {
-				sanitizedMAC, _ := config.SanitizeMAC(mac)
-				sanitizedName, _ := config.SanitizeSSID(name)
-				logger.Info("Device MAC set to: %s (%s)", sanitizedMAC, sanitizedName)
-			}
-			updateInfoDisplay()
-			if mStatus != nil {
-				safeName := config.SanitizeDisplayString(name)
-				mStatus.SetTitle(fmt.Sprintf("✅ Monitoring: %s", safeName))
+			for range item.ClickedCh {
+				if err := config.Update("", mac); err != nil {
+					logger.Error("Failed to set device MAC: %v", err)
+				} else {
+					sanitizedMAC, _ := config.SanitizeMAC(mac)
+					sanitizedName, _ := config.SanitizeSSID(name)
+					logger.Info("Device MAC set to: %s (%s)", sanitizedMAC, sanitizedName)
+				}
+				updateInfoDisplay()
+				if mStatus != nil {
+					safeName := config.SanitizeDisplayString(name)
+					mStatus.SetTitle(fmt.Sprintf("✅ Monitoring: %s", safeName))
+				}
 			}
 		}(deviceMAC, deviceHostname, deviceItem)
 	}

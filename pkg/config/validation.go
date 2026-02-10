@@ -104,16 +104,6 @@ func SanitizePIN(pin string) (string, error) {
 	return pin, nil
 }
 
-// IsPrintableASCII checks if a string contains only printable ASCII characters
-func IsPrintableASCII(s string) bool {
-	for _, r := range s {
-		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
-			return false
-		}
-	}
-	return true
-}
-
 // RemoveControlChars removes control characters from a string
 func RemoveControlChars(s string) string {
 	return strings.Map(func(r rune) rune {

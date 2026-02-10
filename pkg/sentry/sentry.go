@@ -353,7 +353,7 @@ func (s *SentryManager) executeShutdown(settings config.Settings) {
 	case config.ShutdownActionShutdown:
 		cmd = exec.Command("shutdown", "/s", "/t", "0")
 	case config.ShutdownActionHibernate:
-		cmd = exec.Command("rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0")
+		cmd = exec.Command("rundll32.exe", "powrprof.dll,SetSuspendState", "1,1,0")
 	case config.ShutdownActionSleep:
 		cmd = exec.Command("rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0")
 	case config.ShutdownActionLock:
