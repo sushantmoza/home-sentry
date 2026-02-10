@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"home-sentry/pkg/config"
 	"net"
 	"os/exec"
 	"regexp"
@@ -163,19 +164,36 @@ func scanARPWindows() []NetworkDevice {
 			wg.Add(1)
 			go func(ip, mac string) {
 				defer wg.Done()
-				hostname := "Unknown"
 
-				names, err := net.LookupAddr(ip)
-				if err == nil && len(names) > 0 {
-					hostname = strings.TrimSuffix(names[0], ".")
+				// Validate IP from ARP table
+				sanitizedIP, err := config.SanitizeIP(ip)
+				if err != nil || sanitizedIP == "" {
+					return // Skip invalid IPs from ARP
+				}
+
+				// Validate MAC from ARP table
+				sanitizedMAC, err := config.SanitizeMAC(mac)
+				if err != nil || sanitizedMAC == "" {
+					return // Skip invalid MACs from ARP
+				}
+
+				hostname := "Unknown"
+				names, lookupErr := net.LookupAddr(sanitizedIP)
+				if lookupErr == nil && len(names) > 0 {
+					raw := strings.TrimSuffix(names[0], ".")
+					// Sanitize hostname from DNS to prevent injection
+					sanitizedHost, err := config.SanitizeHostname(raw)
+					if err == nil && sanitizedHost != "" {
+						hostname = sanitizedHost
+					}
 				}
 
 				mu.Lock()
 				devices = append(devices, NetworkDevice{
-					IP:       ip,
+					IP:       sanitizedIP,
 					Hostname: hostname,
-					MAC:      mac,
-					Vendor:   GetVendor(mac),
+					MAC:      sanitizedMAC,
+					Vendor:   GetVendor(sanitizedMAC),
 				})
 				mu.Unlock()
 			}(ip, mac)
@@ -287,7 +305,12 @@ func FindIPByMAC(mac string) string {
 		if len(matches) > 2 {
 			foundMAC := strings.ToLower(matches[2])
 			if foundMAC == mac {
-				return matches[1]
+				// Validate the IP before returning
+				foundIP := matches[1]
+				if net.ParseIP(foundIP) != nil {
+					return foundIP
+				}
+				return ""
 			}
 		}
 	}

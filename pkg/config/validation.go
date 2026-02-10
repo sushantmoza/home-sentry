@@ -124,6 +124,59 @@ func RemoveControlChars(s string) string {
 	}, s)
 }
 
+// SanitizeHostname validates and sanitizes a DNS hostname.
+// Hostnames come from external DNS lookups and must be sanitized before logging or display.
+func SanitizeHostname(hostname string) (string, error) {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return "", nil
+	}
+
+	// Remove control characters first
+	hostname = RemoveControlChars(hostname)
+
+	// DNS max hostname length is 253 characters
+	const maxHostnameLength = 253
+	if len(hostname) > maxHostnameLength {
+		hostname = hostname[:maxHostnameLength]
+	}
+
+	// Strip format string specifiers to prevent log injection
+	hostname = strings.ReplaceAll(hostname, "%", "%%")
+
+	// Remove dangerous characters that could be used for injection
+	if dangerousChars.MatchString(hostname) {
+		hostname = dangerousChars.ReplaceAllString(hostname, "")
+	}
+
+	// Ensure only printable characters remain
+	var cleaned strings.Builder
+	for _, r := range hostname {
+		if unicode.IsPrint(r) {
+			cleaned.WriteRune(r)
+		}
+	}
+	hostname = cleaned.String()
+
+	if hostname == "" {
+		return "Unknown", nil
+	}
+
+	return hostname, nil
+}
+
+// SanitizeDisplayString sanitizes any string before displaying in the UI.
+// Prevents control character injection and format string attacks.
+func SanitizeDisplayString(s string) string {
+	s = RemoveControlChars(s)
+	s = strings.ReplaceAll(s, "%", "%%")
+	const maxDisplayLength = 128
+	if len(s) > maxDisplayLength {
+		s = s[:maxDisplayLength] + "..."
+	}
+	return s
+}
+
 // ValidationError represents a validation error with user-friendly message
 type ValidationError struct {
 	Field   string

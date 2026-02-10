@@ -75,11 +75,23 @@ func (s *SentryManager) loadState() {
 		}
 		return
 	}
-	var state SentryState
-	if err := json.Unmarshal(data, &state); err != nil {
-		logger.Info("Failed to parse state file: %v", err)
+
+	// Validate file size to prevent memory exhaustion from corrupted files
+	const maxStateFileSize = 1024 // 1KB is more than enough for state
+	if len(data) > maxStateFileSize {
+		logger.Info("State file too large (%d bytes), ignoring and resetting to defaults", len(data))
 		return
 	}
+
+	var state SentryState
+	if err := json.Unmarshal(data, &state); err != nil {
+		logger.Info("Failed to parse state file (may be corrupted), resetting to defaults: %v", err)
+		return
+	}
+
+	// PhoneEverSeen is a bool, so json.Unmarshal handles type validation.
+	// If the JSON had a non-bool value for phone_ever_seen, Unmarshal would
+	// have returned an error above. The value is safe to use.
 	s.phoneEverSeen = state.PhoneEverSeen
 	logger.Info("Loaded state: phoneEverSeen=%v", s.phoneEverSeen)
 }
@@ -91,7 +103,7 @@ func (s *SentryManager) saveState() {
 		logger.Info("Failed to marshal state: %v", err)
 		return
 	}
-	if err := os.WriteFile(s.stateFile, data, 0644); err != nil {
+	if err := os.WriteFile(s.stateFile, data, 0600); err != nil {
 		logger.Info("Failed to save state file: %v", err)
 	}
 }
@@ -261,12 +273,23 @@ func (s *SentryManager) playWarningSound() {
 	}
 }
 
-// escapePowerShellString escapes single quotes for safe use in PowerShell strings
+// escapePowerShellString escapes a string for safe use inside single-quoted PowerShell strings.
+// Handles single quotes, null bytes, backticks (escape char), and newlines.
 func escapePowerShellString(s string) string {
 	// In PowerShell, single quotes are escaped by doubling them
 	s = strings.ReplaceAll(s, "'", "''")
 	// Remove null bytes for safety
 	s = strings.ReplaceAll(s, "\x00", "")
+	// Remove backticks (PowerShell escape character)
+	s = strings.ReplaceAll(s, "`", "")
+	// Remove newlines/carriage returns that could break the script structure
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	// Truncate to prevent buffer abuse
+	const maxPSStringLen = 256
+	if len(s) > maxPSStringLen {
+		s = s[:maxPSStringLen]
+	}
 	return s
 }
 

@@ -228,3 +228,267 @@ func TestLoadMinimumValues(t *testing.T) {
 		t.Errorf("PingTimeoutMs should be >= 100, got %d", loaded.PingTimeoutMs)
 	}
 }
+
+func TestSanitizeHostname(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostname string
+		wantErr  bool
+		expected string
+	}{
+		{"valid hostname", "myhost.local", false, "myhost.local"},
+		{"empty string", "", false, ""},
+		{"with control chars", "host\x00name", false, "hostname"},
+		{"with format string", "host%sname", false, "host%%sname"},
+		{"with dangerous chars", "host<script>", false, "hostscript"},
+		{"very long hostname", string(make([]byte, 300)), false, "Unknown"},
+		{"only dangerous chars", "<>\"'&", false, "Unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := SanitizeHostname(tt.hostname)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SanitizeHostname(%q) error = %v, wantErr %v", tt.hostname, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && result != tt.expected {
+				t.Errorf("SanitizeHostname(%q) = %q, want %q", tt.hostname, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSanitizeDisplayString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"normal text", "Hello World", "Hello World"},
+		{"control chars", "Hello\x00World", "HelloWorld"},
+		{"format string", "Hello %s World", "Hello %%s World"},
+		{"empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SanitizeDisplayString(tt.input)
+			if result != tt.expected {
+				t.Errorf("SanitizeDisplayString(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateSettings(t *testing.T) {
+	t.Run("valid settings", func(t *testing.T) {
+		s := Settings{
+			HomeSSID:       "MyWiFi",
+			PhoneIP:        "192.168.1.100",
+			PhoneMAC:       "aa:bb:cc:dd:ee:ff",
+			DetectionType:  DetectionTypeMAC,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+			ShutdownPIN:    "1234",
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) != 0 {
+			t.Errorf("Expected no warnings for valid settings, got %v", warnings)
+		}
+		// MAC should be normalized
+		if s.PhoneMAC != "aa-bb-cc-dd-ee-ff" {
+			t.Errorf("PhoneMAC not normalized: %q", s.PhoneMAC)
+		}
+	})
+
+	t.Run("invalid SSID", func(t *testing.T) {
+		s := Settings{
+			HomeSSID:       "<script>alert(1)</script>",
+			DetectionType:  DetectionTypeIP,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid SSID")
+		}
+		if s.HomeSSID != "" {
+			t.Errorf("Invalid SSID should be reset to empty, got %q", s.HomeSSID)
+		}
+	})
+
+	t.Run("invalid IP", func(t *testing.T) {
+		s := Settings{
+			PhoneIP:        "not-an-ip",
+			DetectionType:  DetectionTypeIP,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid IP")
+		}
+		if s.PhoneIP != "" {
+			t.Errorf("Invalid IP should be reset to empty, got %q", s.PhoneIP)
+		}
+	})
+
+	t.Run("invalid MAC", func(t *testing.T) {
+		s := Settings{
+			PhoneMAC:       "not-a-mac",
+			DetectionType:  DetectionTypeMAC,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid MAC")
+		}
+		if s.PhoneMAC != "" {
+			t.Errorf("Invalid MAC should be reset to empty, got %q", s.PhoneMAC)
+		}
+	})
+
+	t.Run("invalid detection type", func(t *testing.T) {
+		s := Settings{
+			DetectionType:  "invalid",
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid detection type")
+		}
+		if s.DetectionType != DefaultDetectionType {
+			t.Errorf("Invalid DetectionType should be reset to default, got %q", s.DetectionType)
+		}
+	})
+
+	t.Run("out of range numerics", func(t *testing.T) {
+		s := Settings{
+			DetectionType:  DetectionTypeIP,
+			GraceChecks:    -1,
+			PollInterval:   999,
+			ShutdownDelay:  9999,
+			ShutdownAction: ShutdownActionShutdown,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) < 3 {
+			t.Errorf("Expected at least 3 warnings for out-of-range numerics, got %d", len(warnings))
+		}
+		if s.GraceChecks != DefaultGraceChecks {
+			t.Errorf("GraceChecks should be reset to default, got %d", s.GraceChecks)
+		}
+		if s.PollInterval != DefaultPollInterval {
+			t.Errorf("PollInterval should be reset to default, got %d", s.PollInterval)
+		}
+		if s.ShutdownDelay != DefaultShutdownDelay {
+			t.Errorf("ShutdownDelay should be reset to default, got %d", s.ShutdownDelay)
+		}
+	})
+
+	t.Run("invalid shutdown action", func(t *testing.T) {
+		s := Settings{
+			DetectionType:  DetectionTypeIP,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: "format_c_drive",
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid shutdown action")
+		}
+		if s.ShutdownAction != DefaultShutdownAction {
+			t.Errorf("ShutdownAction should be reset to default, got %q", s.ShutdownAction)
+		}
+	})
+
+	t.Run("invalid PIN", func(t *testing.T) {
+		s := Settings{
+			DetectionType:  DetectionTypeIP,
+			GraceChecks:    5,
+			PollInterval:   10,
+			ShutdownDelay:  10,
+			ShutdownAction: ShutdownActionShutdown,
+			ShutdownPIN:    "abc",
+			RequirePIN:     true,
+		}
+		warnings := ValidateSettings(&s)
+		if len(warnings) == 0 {
+			t.Error("Expected warnings for invalid PIN")
+		}
+		if s.ShutdownPIN != "" {
+			t.Errorf("Invalid PIN should be reset to empty, got %q", s.ShutdownPIN)
+		}
+		if s.RequirePIN != false {
+			t.Error("RequirePIN should be reset to false when PIN is invalid")
+		}
+	})
+}
+
+func TestLoadWithMaliciousSettings(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "home-sentry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origAppData := os.Getenv("APPDATA")
+	os.Setenv("APPDATA", tmpDir)
+	defer os.Setenv("APPDATA", origAppData)
+
+	hsDir := filepath.Join(tmpDir, "HomeSentry")
+	os.MkdirAll(hsDir, 0755)
+
+	// Write settings with malicious values that should be sanitized on load
+	settingsPath := filepath.Join(hsDir, "settings.json")
+	content := `{
+		"home_ssid": "<script>alert(1)</script>",
+		"phone_ip": "'; DROP TABLE users; --",
+		"phone_mac": "not-a-real-mac",
+		"detection_type": "evil_type",
+		"grace_checks": 5,
+		"poll_interval_sec": 10,
+		"shutdown_delay_sec": 10,
+		"shutdown_action": "rm -rf /",
+		"shutdown_pin": "not-digits"
+	}`
+	os.WriteFile(settingsPath, []byte(content), 0644)
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// All malicious values should be sanitized
+	if loaded.HomeSSID != "" {
+		t.Errorf("Malicious SSID should be reset, got %q", loaded.HomeSSID)
+	}
+	if loaded.PhoneIP != "" {
+		t.Errorf("Malicious IP should be reset, got %q", loaded.PhoneIP)
+	}
+	if loaded.PhoneMAC != "" {
+		t.Errorf("Malicious MAC should be reset, got %q", loaded.PhoneMAC)
+	}
+	if loaded.DetectionType != DefaultDetectionType {
+		t.Errorf("Malicious DetectionType should be reset, got %q", loaded.DetectionType)
+	}
+	if loaded.ShutdownAction != DefaultShutdownAction {
+		t.Errorf("Malicious ShutdownAction should be reset, got %q", loaded.ShutdownAction)
+	}
+	if loaded.ShutdownPIN != "" {
+		t.Errorf("Malicious PIN should be reset, got %q", loaded.ShutdownPIN)
+	}
+}

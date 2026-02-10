@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -123,12 +124,91 @@ func ValidateShutdownAction(action string) bool {
 	}
 }
 
-// VerifyPIN checks if the provided PIN matches the stored PIN
+// ValidateSettings validates and sanitizes all settings fields loaded from disk.
+// Invalid fields are reset to safe defaults rather than rejecting the entire file.
+func ValidateSettings(s *Settings) []string {
+	var warnings []string
+
+	// Validate and sanitize SSID
+	if s.HomeSSID != "" {
+		sanitized, err := SanitizeSSID(s.HomeSSID)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("HomeSSID invalid, reset to empty: %v", err))
+			s.HomeSSID = ""
+		} else {
+			s.HomeSSID = sanitized
+		}
+	}
+
+	// Validate and sanitize PhoneIP
+	if s.PhoneIP != "" {
+		sanitized, err := SanitizeIP(s.PhoneIP)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("PhoneIP invalid, reset to empty: %v", err))
+			s.PhoneIP = ""
+		} else {
+			s.PhoneIP = sanitized
+		}
+	}
+
+	// Validate and sanitize PhoneMAC
+	if s.PhoneMAC != "" {
+		sanitized, err := SanitizeMAC(s.PhoneMAC)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("PhoneMAC invalid, reset to empty: %v", err))
+			s.PhoneMAC = ""
+		} else {
+			s.PhoneMAC = sanitized
+		}
+	}
+
+	// Validate ShutdownPIN
+	if s.ShutdownPIN != "" {
+		sanitized, err := SanitizePIN(s.ShutdownPIN)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("ShutdownPIN invalid, reset to empty: %v", err))
+			s.ShutdownPIN = ""
+			s.RequirePIN = false
+		} else {
+			s.ShutdownPIN = sanitized
+		}
+	}
+
+	// Validate DetectionType
+	if s.DetectionType != DetectionTypeIP && s.DetectionType != DetectionTypeMAC {
+		warnings = append(warnings, fmt.Sprintf("DetectionType invalid (%s), reset to default", s.DetectionType))
+		s.DetectionType = DefaultDetectionType
+	}
+
+	// Validate ShutdownAction
+	if !ValidateShutdownAction(s.ShutdownAction) {
+		warnings = append(warnings, fmt.Sprintf("ShutdownAction invalid (%s), reset to default", s.ShutdownAction))
+		s.ShutdownAction = DefaultShutdownAction
+	}
+
+	// Validate numeric ranges
+	if s.GraceChecks < MinGraceChecks || s.GraceChecks > MaxGraceChecks {
+		warnings = append(warnings, fmt.Sprintf("GraceChecks out of range (%d), reset to default", s.GraceChecks))
+		s.GraceChecks = DefaultGraceChecks
+	}
+	if s.PollInterval < MinPollInterval || s.PollInterval > MaxPollInterval {
+		warnings = append(warnings, fmt.Sprintf("PollInterval out of range (%d), reset to default", s.PollInterval))
+		s.PollInterval = DefaultPollInterval
+	}
+	if s.ShutdownDelay < ShutdownMinDelay || s.ShutdownDelay > ShutdownMaxDelay {
+		warnings = append(warnings, fmt.Sprintf("ShutdownDelay out of range (%d), reset to default", s.ShutdownDelay))
+		s.ShutdownDelay = DefaultShutdownDelay
+	}
+
+	return warnings
+}
+
+// VerifyPIN checks if the provided PIN matches the stored PIN using constant-time comparison
 func (s Settings) VerifyPIN(pin string) bool {
 	if !s.RequirePIN || s.ShutdownPIN == "" {
 		return true // No PIN required
 	}
-	return s.ShutdownPIN == pin
+	return subtle.ConstantTimeCompare([]byte(s.ShutdownPIN), []byte(pin)) == 1
 }
 
 func Load() (Settings, error) {
@@ -159,25 +239,15 @@ func Load() (Settings, error) {
 		decrypted = &settings
 	}
 
-	// Ensure minimum values
-	if decrypted.GraceChecks < 1 {
-		decrypted.GraceChecks = 5
+	// Validate and sanitize all fields loaded from disk
+	warnings := ValidateSettings(decrypted)
+	for _, w := range warnings {
+		fmt.Printf("Warning: %s\n", w)
 	}
-	if decrypted.PollInterval < 1 {
-		decrypted.PollInterval = 10
-	}
+
+	// Ensure minimum values for fields not covered by ValidateSettings range checks
 	if decrypted.PingTimeoutMs < 100 {
-		decrypted.PingTimeoutMs = 500
-	}
-	if decrypted.ShutdownDelay < 5 {
-		decrypted.ShutdownDelay = 10
-	}
-	// Default to IP detection if not set
-	if decrypted.DetectionType == "" {
-		decrypted.DetectionType = DetectionTypeIP
-	}
-	if decrypted.ShutdownAction == "" {
-		decrypted.ShutdownAction = DefaultShutdownAction
+		decrypted.PingTimeoutMs = DefaultPingTimeoutMs
 	}
 
 	return *decrypted, nil

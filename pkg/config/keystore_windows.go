@@ -26,6 +26,16 @@ type DATA_BLOB struct {
 
 // readKeyWindows reads and decrypts the key using Windows DPAPI
 func (ks *KeyStorage) readKeyWindows() ([]byte, error) {
+	// Validate file size before reading
+	info, err := os.Stat(ks.keyPath)
+	if err != nil {
+		return nil, err
+	}
+	const maxKeyFileSize = 4096 // DPAPI-encrypted blobs are larger than raw keys
+	if info.Size() > maxKeyFileSize {
+		return nil, fmt.Errorf("key file too large (%d bytes), max %d", info.Size(), maxKeyFileSize)
+	}
+
 	encryptedKey, err := os.ReadFile(ks.keyPath)
 	if err != nil {
 		return nil, err

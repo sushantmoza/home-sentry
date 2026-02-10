@@ -62,19 +62,25 @@ func (ks *KeyStorage) saveKey(key []byte) error {
 
 // readKeyFile reads key from regular file (fallback for non-Windows)
 func (ks *KeyStorage) readKeyFile() ([]byte, error) {
-	data, err := os.ReadFile(ks.keyPath)
+	// Validate file size before reading to prevent reading oversized/corrupted files
+	info, err := os.Stat(ks.keyPath)
 	if err != nil {
 		return nil, err
 	}
+	const maxKeyFileSize = 1024 // DPAPI-encrypted keys can be larger than 32 bytes
+	if info.Size() > maxKeyFileSize {
+		return nil, fmt.Errorf("key file too large (%d bytes), max %d", info.Size(), maxKeyFileSize)
+	}
 
 	// Verify file permissions are secure
-	info, err := os.Stat(ks.keyPath)
-	if err == nil {
-		mode := info.Mode().Perm()
-		if mode != 0600 {
-			// Log warning about insecure permissions
-			fmt.Printf("Warning: Key file has permissions %o, expected 0600\n", mode)
-		}
+	mode := info.Mode().Perm()
+	if mode != 0600 {
+		fmt.Printf("Warning: Key file has permissions %o, expected 0600\n", mode)
+	}
+
+	data, err := os.ReadFile(ks.keyPath)
+	if err != nil {
+		return nil, err
 	}
 
 	return data, nil

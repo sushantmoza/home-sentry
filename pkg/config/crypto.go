@@ -73,28 +73,12 @@ func decryptString(ciphertext string, key []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-// getOrCreateKey gets or creates an encryption key stored in the user's profile
+// getOrCreateKey gets or creates an encryption key using the platform-native key storage.
+// On Windows, the key is protected using DPAPI (Data Protection API).
+// On other platforms, the key is stored with restrictive file permissions.
 func getOrCreateKey() ([]byte, error) {
-	keyPath := getKeyPath()
-
-	// Try to read existing key
-	keyData, err := os.ReadFile(keyPath)
-	if err == nil && len(keyData) == 32 {
-		return keyData, nil
-	}
-
-	// Generate new key
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("failed to generate key: %w", err)
-	}
-
-	// Save key
-	if err := os.WriteFile(keyPath, key, 0600); err != nil {
-		return nil, fmt.Errorf("failed to save key: %w", err)
-	}
-
-	return key, nil
+	ks := NewKeyStorage()
+	return ks.GetOrCreateKey()
 }
 
 // getKeyPath returns the path to the encryption key

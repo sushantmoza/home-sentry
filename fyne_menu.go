@@ -38,6 +38,7 @@ func initFyneApp() {
 func buildCustomMenu() {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
+	safeSSID := config.SanitizeDisplayString(currentSSID)
 
 	// Status info (disabled/grayed)
 	menuStatus = popupMenu.AddDisabledItem("Status: Starting...")
@@ -48,11 +49,11 @@ func buildCustomMenu() {
 	}
 	menuLocation = popupMenu.AddDisabledItem(locationText)
 
-	menuWiFi = popupMenu.AddDisabledItem(fmt.Sprintf("📶 WiFi: %s", currentSSID))
+	menuWiFi = popupMenu.AddDisabledItem(fmt.Sprintf("📶 WiFi: %s", safeSSID))
 
 	phoneDisplay := "Not Set"
 	if settings.PhoneMAC != "" {
-		phoneDisplay = settings.PhoneMAC
+		phoneDisplay = config.SanitizeDisplayString(settings.PhoneMAC)
 	}
 	menuPhoneMAC = popupMenu.AddDisabledItem(fmt.Sprintf("📱 Phone: %s", phoneDisplay))
 
@@ -66,20 +67,20 @@ func buildCustomMenu() {
 		if err := config.Update(ssid, ""); err != nil {
 			logger.Error("Failed to set home SSID: %v", err)
 		} else {
-			logger.Info("Home SSID set to: %s", ssid)
+			safeSSID := config.SanitizeDisplayString(ssid)
+			logger.Info("Home SSID set to: %s", safeSSID)
 		}
 		updateCustomMenuDisplay()
 	})
 
 	popupMenu.AddItem("📱 Select Monitored Device", func() {
-		// This would ideally open a submenu or dialog
-		// For now, trigger a scan and show devices
 		logger.Info("Select Device clicked - scanning...")
 		devices := network.ScanNetworkDevices()
 		if len(devices) > 0 {
-			// Set first device for demo - ideally show a selection dialog
+			// Devices are already sanitized by ScanNetworkDevices
 			config.Update("", devices[0].MAC)
-			logger.Info("Auto-selected first device: %s", devices[0].MAC)
+			safeMAC := config.SanitizeDisplayString(devices[0].MAC)
+			logger.Info("Auto-selected first device: %s", safeMAC)
 		}
 		updateCustomMenuDisplay()
 	})
@@ -137,6 +138,7 @@ func buildCustomMenu() {
 func updateCustomMenuDisplay() {
 	settings, _ := config.Load()
 	currentSSID := network.GetCurrentSSID()
+	safeSSID := config.SanitizeDisplayString(currentSSID)
 
 	if menuLocation != nil {
 		if currentSSID == settings.HomeSSID && settings.HomeSSID != "" {
@@ -147,12 +149,13 @@ func updateCustomMenuDisplay() {
 	}
 
 	if menuWiFi != nil {
-		menuWiFi.SetText(fmt.Sprintf("📶 WiFi: %s", currentSSID))
+		menuWiFi.SetText(fmt.Sprintf("📶 WiFi: %s", safeSSID))
 	}
 
 	if menuPhoneMAC != nil {
 		if settings.PhoneMAC != "" {
-			menuPhoneMAC.SetText(fmt.Sprintf("📱 Phone: %s", settings.PhoneMAC))
+			safeMAC := config.SanitizeDisplayString(settings.PhoneMAC)
+			menuPhoneMAC.SetText(fmt.Sprintf("📱 Phone: %s", safeMAC))
 		} else {
 			menuPhoneMAC.SetText("📱 Phone: Not Set")
 		}
